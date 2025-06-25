@@ -1,28 +1,32 @@
 <!DOCTYPE html>
 <html>
+
 <head>
     <meta charset="utf-8">
     <title>实时语音识别</title>
     <style>
         #transcriptionResult {
-            white-space: pre-wrap; /* Preserve whitespace and line breaks */
+            white-space: pre-wrap;
+            /* Preserve whitespace and line breaks */
             background-color: #f5f5f5;
             padding: 10px;
             border: 1px solid #ddd;
             border-radius: 5px;
             font-family: monospace;
         }
+
         #recordButton.recording {
             background-color: red;
             color: white;
         }
     </style>
 </head>
+
 <body>
     <div>
         <button id="recordButton">开始</button>
         <label>
-            language: 
+            language:
             <input id="lang" type="text" value="auto" />
         </label>
         <label>
@@ -42,7 +46,7 @@
     var timeInte = null;
     var isRecording = false;
 
-    recordButton.onclick = function() {
+    recordButton.onclick = function () {
         if (!isRecording) {
             startRecording();
         } else {
@@ -65,20 +69,21 @@
         }
         var queryString = queryParams.length > 0 ? `?${queryParams.join('&')}` : '';
 
-        ws = new WebSocket(`wss://192.168.100.205:8888/ws/transcribe${queryString}`);
+        // ws = new WebSocket(`wss://192.168.100.205:8888/ws/transcribe${queryString}`);
+        ws = new WebSocket(`ws://127.0.0.1:27000/ws/transcribe${queryString}`);
         ws.binaryType = 'arraybuffer';
 
-        ws.onopen = function(event) {
+        ws.onopen = function (event) {
             console.log('WebSocket connection established');
             record.start();
-            timeInte = setInterval(function() {
-                if(ws.readyState === 1) {
+            timeInte = setInterval(function () {
+                if (ws.readyState === 1) {
                     var audioBlob = record.getBlob();
                     console.log('Blob size: ', audioBlob.size);
 
                     // Read the Blob content for debugging
                     var reader = new FileReader();
-                    reader.onloadend = function() {
+                    reader.onloadend = function () {
                         console.log('Blob content: ', new Uint8Array(reader.result));
                         ws.send(audioBlob);
                         console.log('Sending audio data');
@@ -89,7 +94,7 @@
             }, 500);
         };
 
-        ws.onmessage = function(evt) {
+        ws.onmessage = function (evt) {
             console.log('Received message: ' + evt.data);
             try {
                 resJson = JSON.parse(evt.data)
@@ -103,11 +108,11 @@
             }
         };
 
-        ws.onclose = function() {
+        ws.onclose = function () {
             console.log('WebSocket connection closed');
         };
 
-        ws.onerror = function(error) {
+        ws.onerror = function (error) {
             console.error('WebSocket error: ' + error);
         };
 
@@ -137,16 +142,16 @@
     } else {
         navigator.getUserMedia(
             { audio: true },
-            function(mediaStream) {
+            function (mediaStream) {
                 init(new Recorder(mediaStream));
             },
-            function(error) {
+            function (error) {
                 console.log(error);
             }
         );
     }
 
-    var Recorder = function(stream) {
+    var Recorder = function (stream) {
         var sampleBits = 16; // Sample bits
         var inputSampleRate = 48000; // Input sample rate
         var outputSampleRate = 16000; // Output sample rate
@@ -159,15 +164,15 @@
             buffer: [],
             inputSampleRate: inputSampleRate,
             inputSampleBits: sampleBits,
-            clear: function() {
+            clear: function () {
                 this.buffer = [];
                 this.size = 0;
             },
-            input: function(data) {
+            input: function (data) {
                 this.buffer.push(new Float32Array(data));
                 this.size += data.length;
             },
-            encodePCM: function() {
+            encodePCM: function () {
                 var bytes = new Float32Array(this.size);
                 var offset = 0;
                 for (var i = 0; i < this.buffer.length; i++) {
@@ -186,20 +191,20 @@
             }
         };
 
-        this.start = function() {
+        this.start = function () {
             audioInput.connect(recorder);
             recorder.connect(context.destination);
         };
 
-        this.stop = function() {
+        this.stop = function () {
             recorder.disconnect();
         };
 
-        this.getBlob = function() {
+        this.getBlob = function () {
             return audioData.encodePCM();
         };
 
-        this.clear = function() {
+        this.clear = function () {
             audioData.clear();
         };
 
@@ -226,7 +231,7 @@
             return result;
         }
 
-        recorder.onaudioprocess = function(e) {
+        recorder.onaudioprocess = function (e) {
             console.log('onaudioprocess called');
             var resampledData = downsampleBuffer(e.inputBuffer.getChannelData(0), inputSampleRate, outputSampleRate);
             audioData.input(resampledData);
@@ -234,4 +239,5 @@
     };
 
 </script>
+
 </html>
