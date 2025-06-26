@@ -29,12 +29,17 @@ logger.add(sys.stderr, format=log_format, level="ERROR", filter=lambda record: r
 
 # --- 全局配置 (无改动) ---
 class Config(BaseSettings):
-    sv_thr: float = Field(0.45, description="Speaker verification threshold for diarization") # 建议为在线日志调高阈值
+    sv_thr: float = Field(0.42, description="Speaker verification threshold for diarization") # 提高阈值，平衡精度和召回
     chunk_size_ms: int = Field(300, description="Chunk size in milliseconds")
     sample_rate: int = Field(16000, description="Sample rate in Hz")
     bit_depth: int = Field(16, description="Bit depth")
     channels: int = Field(1, description="Number of audio channels")
     avg_logprob_thr: float = Field(-0.25, description="average logprob threshold")
+    # 新增说话人识别相关配置
+    min_audio_length_ms: int = Field(800, description="Minimum audio length for speaker verification in milliseconds")  # 降低最小长度要求
+    max_audio_length_ms: int = Field(5000, description="Maximum audio length for speaker verification in milliseconds")
+    speaker_continuity_threshold: int = Field(3, description="Number of consecutive segments to confirm speaker identity")
+    confidence_decay: float = Field(0.95, description="Confidence decay factor for speaker continuity")
 
 config = Config()
 
@@ -144,37 +149,93 @@ model_vad = AutoModel(
 # reg_spks = reg_spk_init(reg_spks_files)
 
 
-# --- 【新】在线说话人日志函数 ---
-def diarize_speaker_online(audio_segment, speaker_gallery, speaker_counter, sv_thr):
+# --- 【改进】在线说话人日志函数 ---
+def check_audio_quality(audio_segment, sample_rate=16000):
     """
-    对音频片段进行在线说话人日志分析。
-    如果识别为新说话人，则更新声纹库。
-
+    检查音频质量，确保适合进行说话人识别
+    
     Args:
-        audio_segment (np.ndarray): 当前的语音片段。
-        speaker_gallery (dict): 当前会话的声纹库 {speaker_id: reference_audio}。
-        speaker_counter (int): 当前会话的说话人计数器。
-        sv_thr (float): 声纹比对的相似度阈值。
-
+        audio_segment (np.ndarray): 音频片段
+        sample_rate (int): 采样率
+        
     Returns:
-        tuple: (识别出的speaker_id, 更新后的speaker_gallery, 更新后的speaker_counter)
+        bool: 音频质量是否合格
     """
+    if len(audio_segment) == 0:
+        return False
+    
+    # 检查音频长度
+    duration_ms = len(audio_segment) / sample_rate * 1000
+    if duration_ms < config.min_audio_length_ms or duration_ms > config.max_audio_length_ms:
+        logger.debug(f"Audio duration {duration_ms:.1f}ms not suitable for speaker verification")
+        return False
+    
+    # 检查音频能量 - 降低要求
+    energy = np.mean(np.abs(audio_segment))
+    if energy < 0.005:  # 降低能量阈值（原值：0.01）
+        logger.debug(f"Audio energy {energy:.4f} too low for speaker verification")
+        return False
+    
+    # 检查音频方差（避免静音或噪声）- 降低要求
+    variance = np.var(audio_segment)
+    if variance < 0.0005:  # 降低方差阈值（原值：0.001）
+        logger.debug(f"Audio variance {variance:.6f} too low for speaker verification")
+        return False
+    
+    return True
+
+def diarize_speaker_online_improved(audio_segment, speaker_gallery, speaker_counter, sv_thr, 
+                                   speaker_history=None, current_speaker=None):
+    """
+    改进的在线说话人日志分析函数
+    
+    Args:
+        audio_segment (np.ndarray): 当前的语音片段
+        speaker_gallery (dict): 当前会话的声纹库 {speaker_id: reference_audio}
+        speaker_counter (int): 当前会话的说话人计数器
+        sv_thr (float): 声纹比对的相似度阈值
+        speaker_history (list): 说话人历史记录 [(speaker_id, confidence, timestamp), ...]
+        current_speaker (str): 当前活跃的说话人
+        
+    Returns:
+        tuple: (识别出的speaker_id, 更新后的speaker_gallery, 更新后的speaker_counter, 
+                更新后的speaker_history, 更新后的current_speaker)
+    """
+    import time
+    
+    # 初始化历史记录
+    if speaker_history is None:
+        speaker_history = []
+    current_time = time.time()
+    
+    # 检查音频质量
+    if not check_audio_quality(audio_segment):
+        # 音频质量不合格，使用当前说话人或默认值
+        if current_speaker:
+            logger.debug(f"Using current speaker '{current_speaker}' due to poor audio quality")
+            return current_speaker, speaker_gallery, speaker_counter, speaker_history, current_speaker
+        else:
+            return "发言人", speaker_gallery, speaker_counter, speaker_history, current_speaker
+    
+    # 如果是第一个说话人
     if not speaker_gallery:
-        # 这是第一个说话人
         speaker_counter += 1
         speaker_id = f"发言人{speaker_counter}"
         speaker_gallery[speaker_id] = audio_segment
-        logger.info(f"New speaker detected. Assigning ID: {speaker_id}")
-        return speaker_id, speaker_gallery, speaker_counter
-
+        speaker_history.append((speaker_id, 1.0, current_time))
+        logger.info(f"First speaker detected. Assigning ID: {speaker_id}")
+        return speaker_id, speaker_gallery, speaker_counter, speaker_history, speaker_id
+    
+    # 与声纹库中的所有说话人进行比对
     best_score = -1.0
     identified_speaker = None
-
-    # 与声纹库中已有的所有说话人进行比对
+    scores = {}
+    
     for spk_id, ref_audio in speaker_gallery.items():
         try:
             res_sv = sv_pipeline([audio_segment, ref_audio])
             score = res_sv["score"]
+            scores[spk_id] = score
             logger.debug(f"Comparing with '{spk_id}', score: {score:.4f}")
             if score > best_score:
                 best_score = score
@@ -182,18 +243,64 @@ def diarize_speaker_online(audio_segment, speaker_gallery, speaker_counter, sv_t
         except Exception as e:
             logger.error(f"Error during speaker comparison with {spk_id}: {e}")
             continue
-
-    if best_score >= sv_thr:
+    
+    # 动态阈值调整：基于历史记录和当前说话人
+    dynamic_threshold = sv_thr
+    
+    # 如果当前有活跃说话人，降低切换阈值
+    if current_speaker and current_speaker in scores:
+        current_score = scores[current_speaker]
+        # 如果当前说话人分数较高，提高切换阈值
+        if current_score > sv_thr * 0.8:
+            dynamic_threshold = sv_thr * 1.1  # 降低阈值提升倍数（原值：1.2）
+            logger.debug(f"Raised threshold to {dynamic_threshold:.3f} for current speaker '{current_speaker}'")
+    
+    # 连续性判断 - 降低严格程度
+    if current_speaker and identified_speaker == current_speaker and best_score >= sv_thr * 0.6:  # 降低连续性阈值（原值：0.7）
+        # 连续说话，保持当前说话人
+        confidence = min(1.0, best_score)
+        speaker_history.append((current_speaker, confidence, current_time))
+        logger.info(f"Speaker continuity confirmed: '{current_speaker}' (score: {best_score:.4f})")
+        return current_speaker, speaker_gallery, speaker_counter, speaker_history, current_speaker
+    
+    # 检查是否匹配到已有说话人
+    if best_score >= dynamic_threshold:
         # 匹配到已有说话人
+        confidence = min(1.0, best_score)
+        speaker_history.append((identified_speaker, confidence, current_time))
         logger.info(f"Matched existing speaker '{identified_speaker}' with score {best_score:.4f}")
-        return identified_speaker, speaker_gallery, speaker_counter
-    else:
-        # 这是一个新的说话人
+        return identified_speaker, speaker_gallery, speaker_counter, speaker_history, identified_speaker
+    
+    # 检查是否应该创建新说话人 - 降低创建新说话人的门槛
+    # 只有当所有分数都明显低于阈值时才创建新说话人
+    all_scores_low = all(score < sv_thr * 0.7 for score in scores.values())  # 降低门槛（原值：0.8）
+    
+    if all_scores_low:
+        # 创建新说话人
         speaker_counter += 1
         new_speaker_id = f"发言人{speaker_counter}"
         speaker_gallery[new_speaker_id] = audio_segment
-        logger.info(f"New speaker detected (best score {best_score:.4f} < threshold). Assigning ID: {new_speaker_id}")
-        return new_speaker_id, speaker_gallery, speaker_counter
+        speaker_history.append((new_speaker_id, 0.8, current_time))
+        logger.info(f"New speaker detected (all scores < {sv_thr * 0.7:.3f}). Assigning ID: {new_speaker_id}")
+        return new_speaker_id, speaker_gallery, speaker_counter, speaker_history, new_speaker_id
+    else:
+        # 分数不够高但也不够低，使用最佳匹配
+        best_speaker = max(scores.items(), key=lambda x: x[1])[0]
+        confidence = min(0.7, scores[best_speaker])
+        speaker_history.append((best_speaker, confidence, current_time))
+        logger.info(f"Using best match '{best_speaker}' with moderate confidence {scores[best_speaker]:.4f}")
+        return best_speaker, speaker_gallery, speaker_counter, speaker_history, best_speaker
+
+# 保留原函数名以兼容现有代码
+def diarize_speaker_online(audio_segment, speaker_gallery, speaker_counter, sv_thr):
+    """
+    兼容性包装函数，调用改进的说话人识别算法
+    """
+    result = diarize_speaker_online_improved(
+        audio_segment, speaker_gallery, speaker_counter, sv_thr, 
+        speaker_history=None, current_speaker=None
+    )
+    return result[0], result[1], result[2]  # 只返回前三个值以保持兼容性
 
 
 def asr(audio, lang, cache, use_itn=False):
@@ -241,7 +348,7 @@ async def custom_exception_handler(request: Request, exc: Exception):
 
 class TranscriptionResponse(BaseModel):
     code: int
-    info: str # 保持与原定义一致
+    msg: str # 保持与原定义一致
     data: str
 
 # 修正: 上方异常处理器中的content应与模型定义匹配
@@ -270,9 +377,11 @@ async def websocket_endpoint(websocket: WebSocket):
         last_vad_beg = last_vad_end = -1
         offset = 0
         
-        # 【新】为当前连接创建独立的声纹库和计数器
+        # 【改进】为当前连接创建独立的声纹库和计数器
         speaker_gallery = {}  # key: "发言人1", value: np.ndarray (声纹音频)
         speaker_counter = 0
+        speaker_history = []  # 说话人历史记录
+        current_speaker = None  # 当前活跃的说话人
         
         buffer = b""
         while True:
@@ -307,9 +416,10 @@ async def websocket_endpoint(websocket: WebSocket):
 
                             speaker_id = "发言人" # 默认ID
                             if sv and len(segment_audio) > 0:
-                                # 1. 调用在线日志函数进行识别或注册
-                                speaker_id, speaker_gallery, speaker_counter = diarize_speaker_online(
-                                    segment_audio, speaker_gallery, speaker_counter, config.sv_thr
+                                # 使用改进的说话人识别算法
+                                speaker_id, speaker_gallery, speaker_counter, speaker_history, current_speaker = diarize_speaker_online_improved(
+                                    segment_audio, speaker_gallery, speaker_counter, config.sv_thr,
+                                    speaker_history, current_speaker
                                 )
                             
                             # 2. 进行语音识别
@@ -328,7 +438,7 @@ async def websocket_endpoint(websocket: WebSocket):
                                 
                                 response = TranscriptionResponse(
                                     code=0,
-                                    info=json.dumps(result[0], ensure_ascii=False),
+                                    msg=json.dumps(result[0], ensure_ascii=False),
                                     data=final_data
                                 )
                                 await websocket.send_json(response.model_dump())
