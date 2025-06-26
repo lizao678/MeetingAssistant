@@ -148,6 +148,10 @@
             </label>
             <label class="checkbox-label"><input type="checkbox" id="speakerVerification"> 区分发言人</label>
         </div>
+        <div class="form-row">
+            <label class="checkbox-label"><input type="checkbox" id="smartLineBreak" checked> 智能换行</label>
+            <span style="font-size: 12px; color: #888;">停顿或发言人变化时换行</span>
+        </div>
         <hr />
         <div style="font-weight:600;margin-bottom:6px;">转录结果：</div>
         <div id="transcriptionResult"></div>
@@ -215,8 +219,28 @@
             try {
                 resJson = JSON.parse(evt.data)
                 if (resJson.code == 0) {
-                    var jsonResponse = JSON.stringify(resJson, null, 4);
-                    transcriptionResult.textContent += "\n" + (resJson.data || 'No speech recognized');
+                    var text = resJson.data || 'No speech recognized';
+                    var smartLineBreakEnabled = document.getElementById('smartLineBreak').checked;
+
+                    // 智能换行处理
+                    if (smartLineBreakEnabled && resJson.is_new_line !== undefined) {
+                        // 智能换行模式
+                        if (resJson.is_new_line) {
+                            // 需要换行：发言人变化或长停顿
+                            transcriptionResult.textContent += "\n" + text;
+                            console.log(`New line (${resJson.segment_type}): ${resJson.speaker_id}`);
+                        } else {
+                            // 继续：接在当前行后面
+                            transcriptionResult.textContent += text;
+                            console.log(`Continue: ${text}`);
+                        }
+                    } else {
+                        // 传统模式：每次都换行
+                        transcriptionResult.textContent += "\n" + text;
+                    }
+
+                    // 自动滚动到底部
+                    transcriptionResult.scrollTop = transcriptionResult.scrollHeight;
                 }
             } catch (e) {
                 console.error('Failed to parse response data', e);
