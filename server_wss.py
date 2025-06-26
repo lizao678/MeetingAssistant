@@ -20,6 +20,212 @@ import sys
 import json
 import traceback
 import time
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
+from collections import deque
+from typing import List, Optional
+
+# --- 高效音频缓冲区类 ---
+class AudioBuffer:
+    """
+    高效的音频缓冲区实现，使用deque避免np.append的性能问题
+    """
+    def __init__(self, max_size: Optional[int] = None, dtype=np.float32):
+        self.chunks = deque(maxlen=max_size)
+        self.dtype = dtype
+        self._total_length = 0
+        
+    def append(self, data: np.ndarray):
+        """添加新的音频数据"""
+        if len(data) > 0:
+            self.chunks.append(data.astype(self.dtype))
+            self._total_length += len(data)
+    
+    def get_data(self, start_idx: int = 0, length: Optional[int] = None) -> np.ndarray:
+        """获取指定范围的音频数据"""
+        if not self.chunks:
+            return np.array([], dtype=self.dtype)
+        
+        # 合并所有chunks
+        combined = np.concatenate(list(self.chunks))
+        
+        if length is None:
+            return combined[start_idx:]
+        else:
+            end_idx = start_idx + length
+            return combined[start_idx:min(end_idx, len(combined))]
+    
+    def pop_front(self, length: int) -> np.ndarray:
+        """从前面弹出指定长度的数据"""
+        if not self.chunks:
+            return np.array([], dtype=self.dtype)
+        
+        result_data = []
+        remaining_length = length
+        
+        while remaining_length > 0 and self.chunks:
+            chunk = self.chunks[0]
+            
+            if len(chunk) <= remaining_length:
+                # 整个chunk都要被弹出
+                result_data.append(self.chunks.popleft())
+                remaining_length -= len(chunk)
+                self._total_length -= len(chunk)
+            else:
+                # 只弹出chunk的一部分
+                result_data.append(chunk[:remaining_length])
+                # 更新第一个chunk
+                self.chunks[0] = chunk[remaining_length:]
+                self._total_length -= remaining_length
+                remaining_length = 0
+        
+        return np.concatenate(result_data) if result_data else np.array([], dtype=self.dtype)
+    
+    def __len__(self) -> int:
+        """返回缓冲区中的总样本数"""
+        return self._total_length
+    
+    def clear(self):
+        """清空缓冲区"""
+        self.chunks.clear()
+        self._total_length = 0
+    
+    def slice_and_keep_rest(self, start_idx: int, end_idx: int) -> np.ndarray:
+        """切片数据并保留剩余部分"""
+        if not self.chunks:
+            return np.array([], dtype=self.dtype)
+        
+        # 获取所有数据
+        all_data = np.concatenate(list(self.chunks))
+        
+        # 提取指定范围的数据
+        sliced_data = all_data[start_idx:end_idx]
+        
+        # 保留剩余数据
+        remaining_data = all_data[end_idx:]
+        
+        # 重新设置缓冲区
+        self.clear()
+        if len(remaining_data) > 0:
+            self.append(remaining_data)
+        
+        return sliced_data
+
+class CircularAudioBuffer:
+    """
+    循环音频缓冲区，用于VAD处理，避免频繁的内存分配
+    """
+    def __init__(self, max_samples: int, dtype=np.float32):
+        self.buffer = np.zeros(max_samples, dtype=dtype)
+        self.max_samples = max_samples
+        self.write_pos = 0
+        self.read_pos = 0
+        self.size = 0
+        self.dtype = dtype
+    
+    def append(self, data: np.ndarray):
+        """添加数据到循环缓冲区"""
+        data = data.astype(self.dtype)
+        data_len = len(data)
+        
+        # 如果数据太大，只保留最后的部分
+        if data_len >= self.max_samples:
+            self.buffer[:] = data[-self.max_samples:]
+            self.write_pos = 0
+            self.read_pos = 0
+            self.size = self.max_samples
+            return
+        
+        # 计算可用空间
+        available_space = self.max_samples - self.size
+        
+        if data_len <= available_space:
+            # 有足够空间，直接添加
+            end_pos = self.write_pos + data_len
+            if end_pos <= self.max_samples:
+                self.buffer[self.write_pos:end_pos] = data
+            else:
+                # 需要环绕
+                split_point = self.max_samples - self.write_pos
+                self.buffer[self.write_pos:] = data[:split_point]
+                self.buffer[:end_pos - self.max_samples] = data[split_point:]
+            
+            self.write_pos = end_pos % self.max_samples
+            self.size += data_len
+        else:
+            # 空间不足，覆盖旧数据
+            overwrite_count = data_len - available_space
+            
+            # 先添加到可用空间
+            if available_space > 0:
+                self.append(data[:available_space])
+            
+            # 然后覆盖旧数据
+            self.read_pos = (self.read_pos + overwrite_count) % self.max_samples
+            self.size -= overwrite_count
+            
+            # 添加剩余数据
+            self.append(data[available_space:])
+    
+    def get_range(self, start_offset: int, length: int) -> np.ndarray:
+        """获取指定范围的数据"""
+        if length <= 0 or start_offset >= self.size:
+            return np.array([], dtype=self.dtype)
+        
+        # 调整长度以不超过可用数据
+        actual_length = min(length, self.size - start_offset)
+        result = np.zeros(actual_length, dtype=self.dtype)
+        
+        start_pos = (self.read_pos + start_offset) % self.max_samples
+        end_pos = start_pos + actual_length
+        
+        if end_pos <= self.max_samples:
+            result[:] = self.buffer[start_pos:end_pos]
+        else:
+            # 需要环绕读取
+            first_part_len = self.max_samples - start_pos
+            result[:first_part_len] = self.buffer[start_pos:]
+            result[first_part_len:] = self.buffer[:actual_length - first_part_len]
+        
+        return result
+    
+    def pop_front(self, length: int) -> np.ndarray:
+        """从前面弹出数据"""
+        if length <= 0 or self.size == 0:
+            return np.array([], dtype=self.dtype)
+        
+        actual_length = min(length, self.size)
+        result = self.get_range(0, actual_length)
+        
+        # 更新读取位置和大小
+        self.read_pos = (self.read_pos + actual_length) % self.max_samples
+        self.size -= actual_length
+        
+        return result
+    
+    def __len__(self) -> int:
+        return self.size
+    
+    def clear(self):
+        """清空缓冲区"""
+        self.write_pos = 0
+        self.read_pos = 0
+        self.size = 0
+
+# --- 线程池配置 ---
+thread_pool_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="model_inference")
+
+# --- 应用生命周期管理 ---
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 应用启动
+    logger.info("Application starting up...")
+    yield
+    # 应用关闭
+    logger.info("Application shutting down...")
+    thread_pool_executor.shutdown(wait=True)
+    logger.info("Thread pool executor shut down")
 
 # --- 日志配置 (无改动) ---
 logger.remove()
@@ -141,6 +347,37 @@ model_vad = AutoModel(
 )
 
 
+# --- 异步模型推理包装函数 ---
+async def async_vad_generate(chunk, cache_vad, chunk_size_ms):
+    """异步VAD推理"""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(
+        thread_pool_executor,
+        lambda: model_vad.generate(input=chunk, cache=cache_vad, is_final=False, chunk_size=chunk_size_ms)
+    )
+
+async def async_sv_pipeline(audio_pair):
+    """异步说话人验证"""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(
+        thread_pool_executor,
+        lambda: sv_pipeline(audio_pair)
+    )
+
+async def async_asr_generate(audio, lang, cache, use_itn=False):
+    """异步语音识别"""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(
+        thread_pool_executor,
+        lambda: model_asr.generate(
+            input=audio,
+            cache=cache,
+            language=lang.strip(),
+            use_itn=use_itn,
+            batch_size_s=60,
+        )
+    )
+
 # --- 【已废弃】旧的全局说话人注册逻辑 ---
 # reg_spks_files = [
 #     "speaker/speaker1_a_cn_16k.wav"
@@ -184,10 +421,10 @@ def check_audio_quality(audio_segment, sample_rate=16000):
     
     return True
 
-def diarize_speaker_online_improved(audio_segment, speaker_gallery, speaker_counter, sv_thr, 
-                                   speaker_history=None, current_speaker=None):
+async def diarize_speaker_online_improved_async(audio_segment, speaker_gallery, speaker_counter, sv_thr, 
+                                               speaker_history=None, current_speaker=None):
     """
-    改进的在线说话人日志分析函数
+    改进的异步在线说话人日志分析函数
     
     Args:
         audio_segment (np.ndarray): 当前的语音片段
@@ -200,6 +437,118 @@ def diarize_speaker_online_improved(audio_segment, speaker_gallery, speaker_coun
     Returns:
         tuple: (识别出的speaker_id, 更新后的speaker_gallery, 更新后的speaker_counter, 
                 更新后的speaker_history, 更新后的current_speaker)
+    """
+    current_time = time.time()
+    
+    # 初始化历史记录
+    if speaker_history is None:
+        speaker_history = []
+    
+    # 检查音频质量
+    if not check_audio_quality(audio_segment):
+        # 音频质量不合格，使用当前说话人或默认值
+        if current_speaker:
+            logger.debug(f"Using current speaker '{current_speaker}' due to poor audio quality")
+            return current_speaker, speaker_gallery, speaker_counter, speaker_history, current_speaker
+        else:
+            return "发言人", speaker_gallery, speaker_counter, speaker_history, current_speaker
+    
+    # 如果是第一个说话人
+    if not speaker_gallery:
+        speaker_counter += 1
+        speaker_id = f"发言人{speaker_counter}"
+        speaker_gallery[speaker_id] = audio_segment
+        speaker_history.append((speaker_id, 1.0, current_time))
+        logger.info(f"First speaker detected. Assigning ID: {speaker_id}")
+        return speaker_id, speaker_gallery, speaker_counter, speaker_history, speaker_id
+    
+    # 与声纹库中的所有说话人进行并发比对
+    comparison_tasks = []
+    speaker_ids = list(speaker_gallery.keys())
+    
+    for spk_id in speaker_ids:
+        ref_audio = speaker_gallery[spk_id]
+        task = async_sv_pipeline([audio_segment, ref_audio])
+        comparison_tasks.append((spk_id, task))
+    
+    # 并发执行所有说话人验证
+    best_score = -1.0
+    identified_speaker = None
+    scores = {}
+    
+    try:
+        for spk_id, task in comparison_tasks:
+            try:
+                res_sv = await task
+                score = res_sv["score"]
+                scores[spk_id] = score
+                logger.debug(f"Comparing with '{spk_id}', score: {score:.4f}")
+                if score > best_score:
+                    best_score = score
+                    identified_speaker = spk_id
+            except Exception as e:
+                logger.error(f"Error during speaker comparison with {spk_id}: {e}")
+                continue
+    except Exception as e:
+        logger.error(f"Error during concurrent speaker verification: {e}")
+        # 如果并发比对失败，使用当前说话人或默认值
+        if current_speaker:
+            return current_speaker, speaker_gallery, speaker_counter, speaker_history, current_speaker
+        else:
+            return "发言人", speaker_gallery, speaker_counter, speaker_history, current_speaker
+    
+    # 动态阈值调整：基于历史记录和当前说话人
+    dynamic_threshold = sv_thr
+    
+    # 如果当前有活跃说话人，降低切换阈值
+    if current_speaker and current_speaker in scores:
+        current_score = scores[current_speaker]
+        # 如果当前说话人分数较高，提高切换阈值
+        if current_score > sv_thr * 0.8:
+            dynamic_threshold = sv_thr * 1.1  # 降低阈值提升倍数（原值：1.2）
+            logger.debug(f"Raised threshold to {dynamic_threshold:.3f} for current speaker '{current_speaker}'")
+    
+    # 连续性判断 - 降低严格程度
+    if current_speaker and identified_speaker == current_speaker and best_score >= sv_thr * 0.6:  # 降低连续性阈值（原值：0.7）
+        # 连续说话，保持当前说话人
+        confidence = min(1.0, best_score)
+        speaker_history.append((current_speaker, confidence, current_time))
+        logger.info(f"Speaker continuity confirmed: '{current_speaker}' (score: {best_score:.4f})")
+        return current_speaker, speaker_gallery, speaker_counter, speaker_history, current_speaker
+    
+    # 检查是否匹配到已有说话人
+    if best_score >= dynamic_threshold:
+        # 匹配到已有说话人
+        confidence = min(1.0, best_score)
+        speaker_history.append((identified_speaker, confidence, current_time))
+        logger.info(f"Matched existing speaker '{identified_speaker}' with score {best_score:.4f}")
+        return identified_speaker, speaker_gallery, speaker_counter, speaker_history, identified_speaker
+    
+    # 检查是否应该创建新说话人 - 降低创建新说话人的门槛
+    # 只有当所有分数都明显低于阈值时才创建新说话人
+    all_scores_low = all(score < sv_thr * 0.7 for score in scores.values())  # 降低门槛（原值：0.8）
+    
+    if all_scores_low:
+        # 创建新说话人
+        speaker_counter += 1
+        new_speaker_id = f"发言人{speaker_counter}"
+        speaker_gallery[new_speaker_id] = audio_segment
+        speaker_history.append((new_speaker_id, 0.8, current_time))
+        logger.info(f"New speaker detected (all scores < {sv_thr * 0.7:.3f}). Assigning ID: {new_speaker_id}")
+        return new_speaker_id, speaker_gallery, speaker_counter, speaker_history, new_speaker_id
+    else:
+        # 分数不够高但也不够低，使用最佳匹配
+        best_speaker = max(scores.items(), key=lambda x: x[1])[0]
+        confidence = min(0.7, scores[best_speaker])
+        speaker_history.append((best_speaker, confidence, current_time))
+        logger.info(f"Using best match '{best_speaker}' with moderate confidence {scores[best_speaker]:.4f}")
+        return best_speaker, speaker_gallery, speaker_counter, speaker_history, best_speaker
+
+# 保留原函数名以兼容现有代码（同步版本）
+def diarize_speaker_online_improved(audio_segment, speaker_gallery, speaker_counter, sv_thr, 
+                                   speaker_history=None, current_speaker=None):
+    """
+    改进的在线说话人日志分析函数（同步版本，保持兼容性）
     """
     import time
     
@@ -303,7 +652,17 @@ def diarize_speaker_online(audio_segment, speaker_gallery, speaker_counter, sv_t
     return result[0], result[1], result[2]  # 只返回前三个值以保持兼容性
 
 
+async def asr_async(audio, lang, cache, use_itn=False):
+    """异步语音识别函数"""
+    start_time = time.time()
+    result = await async_asr_generate(audio, lang, cache, use_itn)
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    logger.debug(f"asr elapsed: {elapsed_time * 1000:.2f} milliseconds")
+    return result
+
 def asr(audio, lang, cache, use_itn=False):
+    """保持原有同步函数以兼容其他地方的调用"""
     start_time = time.time()
     result = model_asr.generate(
         input=audio,
@@ -318,8 +677,8 @@ def asr(audio, lang, cache, use_itn=False):
     return result
 
 
-# --- FastAPI 应用设置 (无改动) ---
-app = FastAPI()
+# --- FastAPI 应用设置 ---
+app = FastAPI(lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"],
 )
@@ -358,7 +717,7 @@ class TranscriptionResponse(BaseModel):
 #     data: str
 
 
-# --- 【修改后】WebSocket 端点 ---
+# --- 【优化后】WebSocket 端点 ---
 @app.websocket("/ws/transcribe")
 async def websocket_endpoint(websocket: WebSocket):
     try:
@@ -370,8 +729,12 @@ async def websocket_endpoint(websocket: WebSocket):
 
         # --- 为每个会话初始化状态 ---
         chunk_size = int(config.chunk_size_ms * config.sample_rate / 1000)
-        audio_buffer = np.array([], dtype=np.float32)
-        audio_vad = np.array([], dtype=np.float32)
+        
+        # 使用高效缓冲区：主缓冲区用于接收数据，VAD缓冲区存储更长时间的音频用于VAD分析
+        audio_buffer = AudioBuffer(max_size=100)  # 主音频接收缓冲区
+        vad_buffer_size = config.sample_rate * 10  # 10秒的VAD缓冲区
+        audio_vad = CircularAudioBuffer(max_samples=vad_buffer_size)
+        
         cache_vad = {}
         cache_asr = {}
         last_vad_beg = last_vad_end = -1
@@ -384,24 +747,33 @@ async def websocket_endpoint(websocket: WebSocket):
         current_speaker = None  # 当前活跃的说话人
         
         buffer = b""
+        logger.info(f"WebSocket session started with chunk_size={chunk_size}, vad_buffer_size={vad_buffer_size}")
+        
         while True:
             data = await websocket.receive_bytes()
             buffer += data
             if len(buffer) < 2:
                 continue
                 
-            audio_buffer = np.append(
-                audio_buffer, 
-                np.frombuffer(buffer[:len(buffer) - (len(buffer) % 2)], dtype=np.int16).astype(np.float32) / 32767.0
-            )
+            # 将字节数据转换为浮点数音频数据
+            new_audio_data = np.frombuffer(
+                buffer[:len(buffer) - (len(buffer) % 2)], 
+                dtype=np.int16
+            ).astype(np.float32) / 32767.0
+            
+            audio_buffer.append(new_audio_data)
             buffer = buffer[len(buffer) - (len(buffer) % 2):]
    
+            # 处理音频chunk
             while len(audio_buffer) >= chunk_size:
-                chunk = audio_buffer[:chunk_size]
-                audio_buffer = audio_buffer[chunk_size:]
-                audio_vad = np.append(audio_vad, chunk)
+                # 从主缓冲区获取一个chunk
+                chunk = audio_buffer.pop_front(chunk_size)
                 
-                res = model_vad.generate(input=chunk, cache=cache_vad, is_final=False, chunk_size=config.chunk_size_ms)
+                # 将chunk添加到VAD缓冲区
+                audio_vad.append(chunk)
+                
+                # 使用异步VAD推理
+                res = await async_vad_generate(chunk, cache_vad, config.chunk_size_ms)
                 
                 if len(res[0]["value"]):
                     for segment in res[0]["value"]:
@@ -411,37 +783,56 @@ async def websocket_endpoint(websocket: WebSocket):
                             beg = int((last_vad_beg - offset) * config.sample_rate / 1000)
                             end = int((last_vad_end - offset) * config.sample_rate / 1000)
                             
-                            segment_audio = audio_vad[beg:end]
-                            logger.info(f"[vad segment] audio_len: {len(segment_audio)}")
+                            # 确保索引不超出VAD缓冲区范围
+                            vad_buffer_length = len(audio_vad)
+                            if beg < vad_buffer_length and end > beg:
+                                end = min(end, vad_buffer_length)
+                                segment_length = end - beg
+                                
+                                segment_audio = audio_vad.get_range(beg, segment_length)
+                                logger.info(f"[vad segment] audio_len: {len(segment_audio)}, beg: {beg}, end: {end}")
 
-                            speaker_id = "发言人" # 默认ID
-                            if sv and len(segment_audio) > 0:
-                                # 使用改进的说话人识别算法
-                                speaker_id, speaker_gallery, speaker_counter, speaker_history, current_speaker = diarize_speaker_online_improved(
-                                    segment_audio, speaker_gallery, speaker_counter, config.sv_thr,
-                                    speaker_history, current_speaker
-                                )
-                            
-                            # 2. 进行语音识别
-                            result = asr(segment_audio, lang.strip(), cache_asr, True)
-                            logger.info(f"asr response: {result}")
-                            
-                            audio_vad = audio_vad[end:]
-                            offset = last_vad_end # 修正offset更新逻辑
-                            last_vad_beg = last_vad_end = -1
-                            
-                            if result is not None and contains_chinese_english_number(result[0]['text']):
-                                formatted_text = format_str_v3(result[0]['text'])
+                                speaker_id = "发言人" # 默认ID
+                                if sv and len(segment_audio) > 0:
+                                    # 使用改进的异步说话人识别算法
+                                    try:
+                                        speaker_id, speaker_gallery, speaker_counter, speaker_history, current_speaker = await diarize_speaker_online_improved_async(
+                                            segment_audio, speaker_gallery, speaker_counter, config.sv_thr,
+                                            speaker_history, current_speaker
+                                        )
+                                    except Exception as e:
+                                        logger.error(f"Speaker verification error: {e}")
+                                        speaker_id = "发言人"
                                 
-                                # 3. 合并说话人ID和识别文本
-                                final_data = f"[{speaker_id}]: {formatted_text}"
+                                # 2. 进行异步语音识别
+                                try:
+                                    result = await asr_async(segment_audio, lang.strip(), cache_asr, True)
+                                    logger.info(f"asr response: {result}")
+                                    
+                                    if result is not None and contains_chinese_english_number(result[0]['text']):
+                                        formatted_text = format_str_v3(result[0]['text'])
+                                        
+                                        # 3. 合并说话人ID和识别文本
+                                        final_data = f"[{speaker_id}]: {formatted_text}"
+                                        
+                                        response = TranscriptionResponse(
+                                            code=0,
+                                            msg=json.dumps(result[0], ensure_ascii=False),
+                                            data=final_data
+                                        )
+                                        await websocket.send_json(response.model_dump())
+                                        
+                                except Exception as e:
+                                    logger.error(f"ASR processing error: {e}")
                                 
-                                response = TranscriptionResponse(
-                                    code=0,
-                                    msg=json.dumps(result[0], ensure_ascii=False),
-                                    data=final_data
-                                )
-                                await websocket.send_json(response.model_dump())
+                                # 清理已处理的VAD数据（保留一些重叠以确保连续性）
+                                overlap_samples = int(0.1 * config.sample_rate)  # 100ms重叠
+                                clear_length = max(0, end - overlap_samples)
+                                if clear_length > 0:
+                                    audio_vad.pop_front(clear_length)
+                                    offset += clear_length / config.sample_rate * 1000  # 转换为毫秒
+                                
+                                last_vad_beg = last_vad_end = -1
                                 
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected")
