@@ -13,7 +13,8 @@ import uvicorn
 import numpy as np
 from fastapi import FastAPI, Request, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.status import HTTP_422_UNPROCESSABLE_ENTITY
 from loguru import logger
@@ -58,6 +59,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# 挂载静态文件（HTML、CSS、JS等）
+app.mount("/static", StaticFiles(directory="."), name="static")
+
 
 @app.exception_handler(Exception)
 async def custom_exception_handler(request: Request, exc: Exception):
@@ -86,7 +90,12 @@ async def custom_exception_handler(request: Request, exc: Exception):
 
 @app.get("/")
 async def root():
-    """根路径健康检查"""
+    """返回前端主页面"""
+    return FileResponse('index.html')
+
+@app.get("/api")
+async def api_info():
+    """API信息端点"""
     return {
         "service": "SenseVoice实时语音识别服务",
         "version": "2.0.0",
