@@ -39,12 +39,12 @@ pip install -r requirements.txt
 ### 2. 启动服务
 
 ```bash
-python main.py --port 27000
+python main.py --port 26000
 ```
 
 ### 3. 访问界面
 
-打开浏览器访问：`http://localhost:27000`
+打开浏览器访问：`http://localhost:26000`
 
 或直接打开 `index.html` 文件
 
@@ -60,13 +60,13 @@ python main.py --port 27000
 
 ### WebSocket接口
 
-**连接地址**：`ws://localhost:27000/ws/transcribe`
+**连接地址**：`ws://localhost:26000/ws/transcribe`
 
 **查询参数**：
 - `sv`：是否启用说话人验证（true/false，默认false）
 - `lang`：语言设置（zh/en/ja/ko/yue/auto，默认auto）
 
-**示例**：`ws://localhost:27000/ws/transcribe?sv=true&lang=zh`
+**示例**：`ws://localhost:26000/ws/transcribe?sv=true&lang=zh`
 
 **响应格式**：
 ```json

@@ -1,0 +1,17 @@
+[Unit]
+Description=SenseVoice Real-time Speech Recognition Service
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/api4sensevoice-main
+Environment=PATH=/home/ubuntu/api4sensevoice-main/venv/bin
+ExecStart=/home/ubuntu/api4sensevoice-main/venv/bin/python main.py --env server --port 8989 --host 0.0.0.0 --certfile cert.pem --keyfile key.pem
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target 

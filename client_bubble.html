@@ -605,7 +605,7 @@
             var queryString = queryParams.length > 0 ? `?${queryParams.join('&')}` : '';
 
             // WebSocket连接
-            ws = new WebSocket(`ws://127.0.0.1:27000/ws/transcribe${queryString}`);
+            ws = new WebSocket(`ws://127.0.0.1:26000/ws/transcribe${queryString}`);
             ws.binaryType = 'arraybuffer';
 
             ws.onopen = function (event) {

@@ -458,6 +458,60 @@
     </div>
 
     <script>
+        // 环境配置
+        const ENV_CONFIG = {
+            local: {
+                host: "127.0.0.1",
+                port: 26000,
+                protocol: "ws",
+                ssl: false
+            },
+            server: {
+                host: "192.168.100.205",
+                port: 8989,
+                protocol: "wss",
+                ssl: true
+            },
+            development: {
+                host: "localhost",
+                port: 26000,
+                protocol: "ws",
+                ssl: false
+            }
+        };
+
+        // 自动检测环境
+        function detectEnvironment() {
+            const hostname = window.location.hostname;
+            const protocol = window.location.protocol;
+
+            console.log(`当前访问: ${protocol}//${hostname}`);
+
+            // 如果是通过服务器IP访问，使用服务器配置
+            if (hostname === ENV_CONFIG.server.host || hostname.includes('192.168.')) {
+                return 'server';
+            }
+            // 如果是HTTPS访问，可能是服务器环境
+            else if (protocol === 'https:') {
+                return 'server';
+            }
+            // 否则使用本地配置
+            else {
+                return 'local';
+            }
+        }
+
+        // 获取WebSocket URL
+        function getWebSocketUrl() {
+            const env = detectEnvironment();
+            const config = ENV_CONFIG[env];
+
+            console.log(`检测到环境: ${env}`);
+            console.log(`使用配置:`, config);
+
+            return `${config.protocol}://${config.host}:${config.port}`;
+        }
+
         // 全局变量
         var recordButton = document.getElementById('recordButton');
         var recordButtonText = document.getElementById('recordButtonText');
@@ -602,8 +656,12 @@
             }
             var queryString = queryParams.length > 0 ? `?${queryParams.join('&')}` : '';
 
-            // WebSocket连接
-            ws = new WebSocket(`ws://127.0.0.1:27000/ws/transcribe${queryString}`);
+            // WebSocket连接 - 自动检测环境
+            const baseUrl = getWebSocketUrl();
+            const wsUrl = `${baseUrl}/ws/transcribe${queryString}`;
+            console.log(`连接到: ${wsUrl}`);
+
+            ws = new WebSocket(wsUrl);
             ws.binaryType = 'arraybuffer';
 
             ws.onopen = function (event) {

@@ -123,7 +123,7 @@ async def websocket_transcribe_endpoint(websocket: WebSocket):
     - sv: 是否启用说话人验证 (true/false, 默认false)
     - lang: 语言设置 (auto/zh/en等, 默认auto)
     
-    示例: ws://localhost:27000/ws/transcribe?sv=true&lang=auto
+    示例: ws://localhost:26000/ws/transcribe?sv=true&lang=auto
     """
     try:
         # 解析查询参数
@@ -335,7 +335,7 @@ async def websocket_transcribe_endpoint(websocket: WebSocket):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="运行SenseVoice实时语音识别服务")
-    parser.add_argument('--port', type=int, default=27000, help='服务端口号')
+    parser.add_argument('--port', type=int, default=26000, help='服务端口号')
     parser.add_argument('--host', type=str, default="0.0.0.0", help='服务主机地址')
     parser.add_argument('--certfile', type=str, help='SSL证书文件路径')
     parser.add_argument('--keyfile', type=str, help='SSL密钥文件路径')
@@ -343,26 +343,58 @@ if __name__ == "__main__":
     parser.add_argument('--log-level', type=str, default="info", 
                       choices=['debug', 'info', 'warning', 'error'],
                       help='日志级别')
+    parser.add_argument('--env', type=str, default="auto", 
+                      choices=['local', 'server', 'auto'],
+                      help='运行环境: local(本地), server(服务器), auto(自动检测)')
     
     args = parser.parse_args()
     
+    # 环境检测和配置
+    if args.env == "auto":
+        # 自动检测：如果提供了SSL证书，认为是服务器环境
+        is_server = bool(args.certfile and args.keyfile)
+    else:
+        is_server = args.env == "server"
+    
+    # 根据环境调整默认配置
+    if is_server:
+        # 服务器环境：需要SSL证书
+        if not args.certfile or not args.keyfile:
+            logger.warning("服务器环境需要SSL证书，请提供 --certfile 和 --keyfile 参数")
+            logger.info("示例: python main.py --env server --port 8989 --certfile /path/to/cert.pem --keyfile /path/to/key.pem")
+        protocol = "wss" if (args.certfile and args.keyfile) else "ws"
+        logger.info(f"🌐 服务器模式启动 ({protocol})")
+    else:
+        # 本地环境：不使用SSL
+        protocol = "ws"
+        logger.info("🏠 本地模式启动 (ws)")
+    
     logger.info(f"启动SenseVoice实时语音识别服务...")
     logger.info(f"服务地址: {args.host}:{args.port}")
+    logger.info(f"协议: {protocol}://")
     logger.info(f"配置信息: 采样率={config.sample_rate}Hz, 块大小={config.chunk_size_ms}ms")
     logger.info(f"说话人验证阈值: {config.sv_thr}")
     logger.info(f"线程池工作线程数: {config.thread_pool_max_workers}")
     
     # 启动服务
     try:
-        uvicorn.run(
-            app, 
-            host=args.host, 
-            port=args.port,
-            log_level=args.log_level,
-            workers=args.workers if args.workers > 1 else None,
-            ssl_keyfile=args.keyfile,
-            ssl_certfile=args.certfile
-        )
+        run_kwargs = {
+            "app": app,
+            "host": args.host,
+            "port": args.port,
+            "log_level": args.log_level,
+        }
+        
+        # 只有在服务器模式且提供了证书时才启用SSL
+        if is_server and args.certfile and args.keyfile:
+            run_kwargs["ssl_keyfile"] = args.keyfile
+            run_kwargs["ssl_certfile"] = args.certfile
+            logger.info(f"SSL已启用: 证书={args.certfile}, 密钥={args.keyfile}")
+        
+        if args.workers > 1:
+            run_kwargs["workers"] = args.workers
+            
+        uvicorn.run(**run_kwargs)
     except Exception as e:
         logger.error(f"服务启动失败: {e}")
  
