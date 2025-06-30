@@ -34,14 +34,14 @@ def check_audio_quality(audio_segment: np.ndarray, sample_rate: int = 16000) -> 
     
     # 检查音频能量
     energy = np.mean(np.abs(audio_segment))
-    if energy < 0.005:  # 降低能量阈值
-        logger.debug(f"Audio energy {energy:.4f} too low for speaker verification")
+    if energy < 0.0001:  # 进一步降低能量阈值
+        logger.debug(f"Audio energy {energy:.6f} too low for speaker verification")
         return False
     
     # 检查音频方差（避免静音或噪声）
     variance = np.var(audio_segment)
-    if variance < 0.0005:  # 降低方差阈值
-        logger.debug(f"Audio variance {variance:.6f} too low for speaker verification")
+    if variance < 0.00001:  # 进一步降低方差阈值
+        logger.debug(f"Audio variance {variance:.8f} too low for speaker verification")
         return False
     
     return True

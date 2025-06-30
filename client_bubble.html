@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN">
 
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>实时语音识别 - 聊天风格</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>实时语音识别</title>
     <style>
         * {
             margin: 0;
@@ -13,94 +13,217 @@
         }
 
         body {
-            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-            font-family: 'Segoe UI', 'Microsoft YaHei', Arial, sans-serif;
-            height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            padding: 20px;
+        }
+
+        .container {
+            background: rgba(255, 255, 255, 0.95);
+            -webkit-backdrop-filter: blur(10px);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            padding: 30px;
+            width: 100%;
+            max-width: 900px;
+            min-height: 80vh;
             display: flex;
             flex-direction: column;
         }
 
         .header {
-            background: rgba(255, 255, 255, 0.95);
-            -webkit-backdrop-filter: blur(10px);
-            backdrop-filter: blur(10px);
-            padding: 16px 20px;
-            border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            margin-bottom: 30px;
         }
 
         .header h1 {
             color: #333;
-            font-size: 18px;
+            font-size: 28px;
             font-weight: 600;
+            margin-bottom: 10px;
         }
 
-        .status-indicator {
+        .header .subtitle {
+            color: #666;
+            font-size: 16px;
+        }
+
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            justify-content: center;
+            align-items: center;
+            margin-bottom: 30px;
+            padding: 20px;
+            background: rgba(240, 240, 240, 0.5);
+            border-radius: 15px;
+        }
+
+        .control-group {
             display: flex;
             align-items: center;
+            gap: 10px;
+        }
+
+        label {
+            font-weight: 500;
+            color: #333;
             font-size: 14px;
-            color: #666;
+        }
+
+        select,
+        input[type="text"] {
+            padding: 8px 12px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 14px;
+            background: white;
+            transition: border-color 0.3s;
+        }
+
+        select:focus,
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+
+        .checkbox-label input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            accent-color: #667eea;
+        }
+
+        .status-bar {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: rgba(240, 240, 240, 0.3);
+            border-radius: 10px;
         }
 
         .status-dot {
-            width: 8px;
-            height: 8px;
+            width: 12px;
+            height: 12px;
             border-radius: 50%;
             background: #ccc;
-            margin-right: 8px;
-            transition: background 0.3s;
+            transition: background-color 0.3s;
         }
 
-        .status-dot.recording {
-            background: #ff4d4f;
+        .status-dot.connecting {
+            background: #ffa500;
             animation: pulse 1.5s infinite;
         }
 
         .status-dot.connected {
-            background: #52c41a;
+            background: #4caf50;
+        }
+
+        .status-dot.recording {
+            background: #f44336;
+            animation: pulse 1.5s infinite;
         }
 
         @keyframes pulse {
-            0% {
+
+            0%,
+            100% {
                 opacity: 1;
             }
 
             50% {
                 opacity: 0.5;
             }
+        }
 
+        .status-text {
+            font-size: 14px;
+            color: #666;
+            font-weight: 500;
+        }
+
+        .record-section {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .record-button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 80px;
+            height: 80px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto;
+        }
+
+        .record-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 35px rgba(102, 126, 234, 0.4);
+        }
+
+        .record-button.recording {
+            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);
+            animation: recordPulse 2s infinite;
+        }
+
+        @keyframes recordPulse {
+
+            0%,
             100% {
-                opacity: 1;
+                transform: scale(1);
+            }
+
+            50% {
+                transform: scale(1.05);
             }
         }
 
-        .chat-container {
+        .messages-container {
             flex: 1;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
-
-        .messages {
-            flex: 1;
+            background: white;
+            border-radius: 15px;
             padding: 20px;
             overflow-y: auto;
-            scroll-behavior: smooth;
+            max-height: 500px;
+            border: 1px solid #eee;
         }
 
         .message {
-            margin-bottom: 16px;
             display: flex;
-            animation: fadeInUp 0.3s ease-out;
+            margin-bottom: 15px;
+            animation: fadeInUp 0.3s ease;
         }
 
         @keyframes fadeInUp {
             from {
                 opacity: 0;
-                transform: translateY(20px);
+                transform: translateY(10px);
             }
 
             to {
@@ -110,56 +233,35 @@
         }
 
         .message-avatar {
-            width: 36px;
-            height: 36px;
+            width: 40px;
+            height: 40px;
             border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
+            font-weight: bold;
             color: white;
-            font-weight: 600;
             font-size: 14px;
             margin-right: 12px;
             flex-shrink: 0;
         }
 
-        .speaker-1 .message-avatar {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        }
-
-        .speaker-2 .message-avatar {
-            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-        }
-
-        .speaker-3 .message-avatar {
-            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-        }
-
-        .speaker-4 .message-avatar {
-            background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
-        }
-
-        .speaker-default .message-avatar {
-            background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);
-            color: #666;
-        }
-
         .message-content {
             flex: 1;
-            max-width: 70%;
+            max-width: calc(100% - 52px);
         }
 
         .message-header {
             display: flex;
             align-items: center;
-            margin-bottom: 4px;
+            gap: 10px;
+            margin-bottom: 5px;
         }
 
         .speaker-name {
             font-weight: 600;
-            color: #333;
             font-size: 14px;
-            margin-right: 8px;
+            color: #333;
         }
 
         .message-time {
@@ -167,363 +269,259 @@
             color: #999;
         }
 
+        .confidence-badge {
+            background: #e3f2fd;
+            color: #1976d2;
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+
+        .confidence-badge.high {
+            background: #e8f5e8;
+            color: #2e7d32;
+        }
+
+        .confidence-badge.medium {
+            background: #fff3e0;
+            color: #f57c00;
+        }
+
+        .confidence-badge.low {
+            background: #ffebee;
+            color: #d32f2f;
+        }
+
         .message-bubble {
-            background: white;
+            background: #f5f5f5;
             padding: 12px 16px;
             border-radius: 18px;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-            position: relative;
-            line-height: 1.5;
-            color: #333;
+            line-height: 1.4;
             word-wrap: break-word;
+            font-size: 15px;
+            color: #333;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
         }
 
-        .message-bubble::before {
-            content: '';
-            position: absolute;
-            top: 8px;
-            left: -8px;
-            width: 0;
-            height: 0;
-            border-top: 8px solid transparent;
-            border-bottom: 8px solid transparent;
-            border-right: 8px solid white;
-        }
-
-        .controls {
-            background: rgba(255, 255, 255, 0.95);
-            -webkit-backdrop-filter: blur(10px);
-            backdrop-filter: blur(10px);
-            padding: 20px;
-            border-top: 1px solid rgba(0, 0, 0, 0.05);
-        }
-
-        .control-row {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 16px;
-        }
-
-        .control-group {
-            display: flex;
-            align-items: center;
-            gap: 16px;
-        }
-
-        .control-item {
-            display: flex;
-            align-items: center;
-            font-size: 14px;
-            color: #666;
-        }
-
-        .control-item label {
-            margin-left: 6px;
-            cursor: pointer;
-        }
-
-        input[type="checkbox"] {
-            accent-color: #1890ff;
-            width: 16px;
-            height: 16px;
-        }
-
-        #lang {
-            padding: 6px 12px;
-            border: 1px solid #d9d9d9;
-            border-radius: 6px;
-            font-size: 14px;
-            background: white;
-        }
-
-        .record-button {
-            width: 80%;
-            margin: 0 auto;
-            height: 56px;
-            border: none;
-            border-radius: 28px;
+        /* 不同说话人的颜色主题 */
+        .speaker-1 .message-avatar {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
         }
 
-        .record-button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.3);
+        .speaker-1 .message-bubble {
+            background: linear-gradient(135deg, #667eea10 0%, #764ba210 100%);
+            border-left: 3px solid #667eea;
         }
 
-        .record-button.recording {
-            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);
-            animation: recordingPulse 2s infinite;
+        .speaker-2 .message-avatar {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
         }
 
-        @keyframes recordingPulse {
-            0% {
-                transform: scale(1);
+        .speaker-2 .message-bubble {
+            background: linear-gradient(135deg, #f093fb10 0%, #f5576c10 100%);
+            border-left: 3px solid #f093fb;
+        }
+
+        .speaker-3 .message-avatar {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+        }
+
+        .speaker-3 .message-bubble {
+            background: linear-gradient(135deg, #4facfe10 0%, #00f2fe10 100%);
+            border-left: 3px solid #4facfe;
+        }
+
+        .speaker-4 .message-avatar {
+            background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+        }
+
+        .speaker-4 .message-bubble {
+            background: linear-gradient(135deg, #fa709a10 0%, #fee14010 100%);
+            border-left: 3px solid #fa709a;
+        }
+
+        /* 默认说话人样式 */
+        .speaker-default .message-avatar {
+            background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);
+        }
+
+        .speaker-default .message-bubble {
+            background: linear-gradient(135deg, #a8edea10 0%, #fed6e310 100%);
+            border-left: 3px solid #a8edea;
+        }
+
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            .container {
+                margin: 10px;
+                padding: 20px;
+                min-height: 90vh;
             }
 
-            50% {
-                transform: scale(1.05);
+            .controls {
+                flex-direction: column;
+                gap: 15px;
             }
 
-            100% {
-                transform: scale(1);
-            }
-        }
-
-        .record-icon {
-            width: 20px;
-            height: 20px;
-            border-radius: 50%;
-            background: rgba(255, 255, 255, 0.3);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .record-icon::before {
-            content: '';
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: white;
-        }
-
-        .recording .record-icon::before {
-            animation: recordDot 1s infinite;
-        }
-
-        @keyframes recordDot {
-
-            0%,
-            100% {
-                opacity: 1;
+            .control-group {
+                width: 100%;
+                justify-content: center;
             }
 
-            50% {
-                opacity: 0.3;
+            .header h1 {
+                font-size: 24px;
+            }
+
+            .record-button {
+                width: 70px;
+                height: 70px;
+                font-size: 14px;
+            }
+
+            .message {
+                margin-bottom: 12px;
+            }
+
+            .message-avatar {
+                width: 35px;
+                height: 35px;
+                font-size: 12px;
+            }
+
+            .message-bubble {
+                font-size: 14px;
+                padding: 10px 14px;
             }
         }
 
         .empty-state {
             text-align: center;
             color: #999;
-            padding: 60px 20px;
-        }
-
-        .empty-state-icon {
-            font-size: 48px;
-            margin-bottom: 16px;
-            opacity: 0.5;
-        }
-
-        .empty-state-text {
             font-size: 16px;
-            line-height: 1.5;
+            margin-top: 50px;
         }
 
-        .confidence-badge {
-            display: inline-block;
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-size: 11px;
-            font-weight: 500;
-            margin-left: 6px;
-        }
-
-        .confidence-high {
-            background: #f6ffed;
-            color: #52c41a;
-            border: 1px solid #b7eb8f;
-        }
-
-        .confidence-medium {
-            background: #fff7e6;
-            color: #fa8c16;
-            border: 1px solid #ffd591;
-        }
-
-        .confidence-low {
-            background: #fff2f0;
-            color: #ff4d4f;
-            border: 1px solid #ffccc7;
-        }
-
-        /* 响应式设计 */
-        @media (max-width: 768px) {
-            .header {
-                padding: 12px 16px;
-            }
-
-            .header h1 {
-                font-size: 16px;
-            }
-
-            .messages {
-                padding: 16px;
-            }
-
-            .message-content {
-                max-width: 85%;
-            }
-
-            .controls {
-                padding: 16px;
-            }
-
-            .control-row {
-                flex-direction: column;
-                gap: 12px;
-                align-items: stretch;
-            }
-
-            .control-group {
-                justify-content: space-between;
-            }
-        }
-
-        /* 滚动条美化 */
-        .messages::-webkit-scrollbar {
-            width: 6px;
-        }
-
-        .messages::-webkit-scrollbar-track {
-            background: transparent;
-        }
-
-        .messages::-webkit-scrollbar-thumb {
-            background: rgba(0, 0, 0, 0.1);
-            border-radius: 3px;
-        }
-
-        .messages::-webkit-scrollbar-thumb:hover {
-            background: rgba(0, 0, 0, 0.2);
+        .empty-state i {
+            font-size: 48px;
+            margin-bottom: 15px;
+            display: block;
         }
     </style>
 </head>
 
 <body>
-    <div class="header">
-        <h1>🎙️ 实时语音识别</h1>
-        <div class="status-indicator">
-            <div class="status-dot" id="statusDot"></div>
-            <span id="statusText">等待连接</span>
+    <div class="container">
+        <div class="header">
+            <h1>🎤 实时语音识别</h1>
+            <div class="subtitle">智能说话人识别 · 实时转录 · 聊天气泡界面</div>
         </div>
-    </div>
 
-    <div class="chat-container">
-        <div class="messages" id="messages">
-            <div class="empty-state">
-                <div class="empty-state-icon">🎤</div>
-                <div class="empty-state-text">
-                    点击下方按钮开始语音识别<br>
-                    支持多语言识别和说话人区分
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div class="controls">
-        <div class="control-row">
+        <div class="controls">
             <div class="control-group">
-                <div class="control-item">
-                    <label for="lang">语言:</label>
-                    <select id="lang">
-                        <option value="auto">自动识别</option>
-                        <option value="zh" selected>中文</option>
-                        <option value="en">英文</option>
-                        <option value="ja">日语</option>
-                        <option value="ko">韩语</option>
-                        <option value="yue">粤语</option>
-                    </select>
-                </div>
-                <div class="control-item">
-                    <input type="checkbox" id="speakerVerification" checked>
-                    <label for="speakerVerification">区分发言人</label>
-                </div>
-                <div class="control-item">
-                    <input type="checkbox" id="smartLineBreak" checked>
-                    <label for="smartLineBreak">智能换行</label>
-                </div>
+                <label for="lang">语言:</label>
+                <select id="lang">
+                    <option value="auto">自动识别</option>
+                    <option value="zh" selected>中文</option>
+                    <option value="en">英文</option>
+                    <option value="ja">日语</option>
+                    <option value="ko">韩语</option>
+                    <option value="yue">粤语</option>
+                </select>
+            </div>
+
+            <div class="control-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="speakerVerification" checked> 区分发言人
+                </label>
+            </div>
+
+            <div class="control-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="smartLineBreak" checked> 智能换行
+                </label>
             </div>
         </div>
-        <button class="record-button" id="recordButton">
-            <div class="record-icon"></div>
-            <span id="recordButtonText">开始录音</span>
-        </button>
+
+        <div class="status-bar">
+            <div class="status-dot" id="statusDot"></div>
+            <div class="status-text" id="statusText">等待连接</div>
+        </div>
+
+        <div class="record-section">
+            <button id="recordButton" class="record-button">
+                <span id="recordButtonText">开始录音</span>
+            </button>
+        </div>
+
+        <div class="messages-container" id="messagesContainer">
+            <div class="empty-state">
+                <i>🎙️</i>
+                点击上方按钮开始录音，实时转录您的语音
+            </div>
+        </div>
     </div>
 
     <script>
         // 全局变量
         var recordButton = document.getElementById('recordButton');
         var recordButtonText = document.getElementById('recordButtonText');
-        var messagesContainer = document.getElementById('messages');
+        var messagesContainer = document.getElementById('messagesContainer');
         var statusDot = document.getElementById('statusDot');
         var statusText = document.getElementById('statusText');
-
         var ws = null;
         var record = null;
         var timeInte = null;
         var isRecording = false;
-        var messageCount = 0;
-        var speakerColors = {};
+
+        // 状态管理
         var lastSpeaker = null;
         var currentMessageElement = null;
 
-        // 获取说话人头像颜色类
+        // 获取说话人对应的CSS类
         function getSpeakerClass(speakerId) {
-            if (!speakerColors[speakerId]) {
-                const colorClasses = ['speaker-1', 'speaker-2', 'speaker-3', 'speaker-4'];
-                const usedClasses = Object.values(speakerColors);
-                const availableClasses = colorClasses.filter(cls => !usedClasses.includes(cls));
-
-                if (availableClasses.length > 0) {
-                    speakerColors[speakerId] = availableClasses[0];
-                } else {
-                    speakerColors[speakerId] = 'speaker-default';
-                }
+            var speakerNumber = speakerId.replace('发言人', '');
+            if (speakerNumber && !isNaN(speakerNumber)) {
+                return `speaker-${speakerNumber}`;
             }
-            return speakerColors[speakerId];
+            return 'speaker-default';
         }
 
         // 获取置信度徽章
         function getConfidenceBadge(confidence) {
             if (!confidence) return '';
 
-            let badgeClass = 'confidence-low';
-            let badgeText = '低';
+            var level = 'medium';
+            var text = '中等';
 
             if (confidence > 0.8) {
-                badgeClass = 'confidence-high';
-                badgeText = '高';
-            } else if (confidence > 0.6) {
-                badgeClass = 'confidence-medium';
-                badgeText = '中';
+                level = 'high';
+                text = '高';
+            } else if (confidence < 0.5) {
+                level = 'low';
+                text = '低';
             }
 
-            return `<span class="confidence-badge ${badgeClass}">${badgeText}</span>`;
+            return `<span class="confidence-badge ${level}">${text}</span>`;
         }
 
-        // 添加消息到聊天界面
-        function addMessage(speakerId, text, isNewMessage = true, confidence = null) {
-            // 清除空状态
-            if (messagesContainer.querySelector('.empty-state')) {
-                messagesContainer.innerHTML = '';
-            }
-
-            const currentTime = new Date().toLocaleTimeString('zh-CN', {
+        // 获取当前时间字符串
+        function getCurrentTime() {
+            return new Date().toLocaleTimeString('zh-CN', {
                 hour12: false,
                 hour: '2-digit',
                 minute: '2-digit'
             });
+        }
+
+        // 添加消息到界面
+        function addMessage(speakerId, text, isNewMessage, confidence) {
+            // 清空初始状态
+            if (messagesContainer.querySelector('.empty-state')) {
+                messagesContainer.innerHTML = '';
+            }
+
+            var currentTime = getCurrentTime();
 
             // 详细调试信息
 
