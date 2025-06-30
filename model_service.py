@@ -35,13 +35,13 @@ def initialize_models():
     
     logger.info("开始加载AI模型...")
     
-    # 加载说话人验证模型
+    # 加载说话人验证模型 (CAM++模型，更轻量且性能更优)
     sv_pipeline = pipeline(
         task='speaker-verification',
-        model='iic/speech_eres2net_large_sv_zh-cn_3dspeaker_16k',
+        model='iic/speech_campplus_sv_zh-cn_16k-common',
         model_revision='v1.0.0'
     )
-    logger.info("说话人验证模型加载完成")
+    logger.info("说话人验证模型(CAM++)加载完成")
     
     # 加载语音识别模型
     model_asr = AutoModel(
