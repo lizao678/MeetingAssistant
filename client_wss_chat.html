@@ -525,8 +525,12 @@
                 minute: '2-digit'
             });
 
+            // 详细调试信息
+
+
+            // 修复逻辑：只有在明确需要新行或说话人变化时才创建新消息
             if (isNewMessage || lastSpeaker !== speakerId) {
-                // 创建新消息
+                // 创建新消息气泡
                 const messageDiv = document.createElement('div');
                 messageDiv.className = `message ${getSpeakerClass(speakerId)}`;
 
@@ -547,10 +551,21 @@
                 messagesContainer.appendChild(messageDiv);
                 currentMessageElement = messageDiv.querySelector('.message-bubble');
                 lastSpeaker = speakerId;
+
             } else {
-                // 更新现有消息
+                // 追加到现有消息：同一说话人且不需要换行
                 if (currentMessageElement) {
-                    currentMessageElement.textContent += text;
+                    // 如果当前气泡有内容，在追加文本前加个空格
+                    var currentContent = currentMessageElement.textContent.trim();
+                    if (currentContent.length > 0) {
+                        currentMessageElement.textContent = currentContent + " " + text;
+                    } else {
+                        currentMessageElement.textContent = text;
+                    }
+                } else {
+                    // 如果没有当前消息元素，创建新的
+                    addMessage(speakerId, text, true, confidence);
+                    return;
                 }
             }
 
@@ -607,7 +622,7 @@
 
                         var reader = new FileReader();
                         reader.onloadend = function () {
-                            console.log('Blob content: ', new Uint8Array(reader.result));
+
                             ws.send(audioBlob);
                             console.log('Sending audio data');
                             record.clear();
@@ -621,6 +636,8 @@
                 recordButtonText.textContent = "停止录音";
                 updateStatus('recording', '录音中...');
                 isRecording = true;
+
+                // 重要：不要重置说话人状态，保持会话连续性
             };
 
             ws.onmessage = function (evt) {
@@ -631,29 +648,34 @@
                         var text = resJson.data || 'No speech recognized';
                         var smartLineBreakEnabled = document.getElementById('smartLineBreak').checked;
 
-                        // 解析说话人信息
-                        var speakerId = '发言人';
+                        // 解析说话人信息 - 修复版
+                        var speakerId = resJson.speaker_id || '发言人';
                         var confidence = null;
 
-                        // 从文本中提取说话人信息
+                        // 如果data中包含说话人信息，提取纯文本
                         var speakerMatch = text.match(/^\[([^\]]+)\]:\s*(.+)$/);
                         if (speakerMatch) {
-                            speakerId = speakerMatch[1];
+                            // data中包含说话人信息，提取纯文本
                             text = speakerMatch[2];
+                        }
+                        // 如果data中没有说话人信息，text保持原样
 
-                            // 可以从msg中获取置信度信息
-                            try {
-                                var msgData = JSON.parse(resJson.msg);
-                                confidence = msgData.confidence;
-                            } catch (e) {
-                                // 忽略解析错误
-                            }
+                        // 可以从msg中获取置信度信息
+                        try {
+                            var msgData = JSON.parse(resJson.msg);
+                            confidence = msgData.confidence;
+                        } catch (e) {
+                            // 忽略解析错误
                         }
 
                         // 智能换行处理
                         var isNewMessage = true;
                         if (smartLineBreakEnabled && resJson.is_new_line !== undefined) {
+                            // 智能换行模式：直接使用后端返回的判断
                             isNewMessage = resJson.is_new_line;
+                        } else {
+                            // 传统模式：每次都是新消息
+                            isNewMessage = true;
                         }
 
                         // 添加消息到界面
@@ -688,8 +710,7 @@
             recordButtonText.textContent = "开始录音";
             updateStatus('', '等待连接');
             isRecording = false;
-            lastSpeaker = null;
-            currentMessageElement = null;
+            // 注意：不清理 lastSpeaker 和 currentMessageElement，以保持会话连续性
         }
 
         function init(rec) {
@@ -697,12 +718,10 @@
         }
 
         // 初始化音频录制
-        if (!navigator.getUserMedia) {
-            navigator.getUserMedia = navigator.webkitGetUserMedia || navigator.mozGetUserMedia;
-        }
+        navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia;
 
         if (!navigator.getUserMedia) {
-            alert('您的浏览器不支持音频输入');
+            alert('Your browser does not support audio input');
         } else {
             navigator.getUserMedia(
                 { audio: true },
@@ -711,7 +730,6 @@
                 },
                 function (error) {
                     console.log(error);
-                    alert('无法访问麦克风，请检查权限设置');
                 }
             );
         }
