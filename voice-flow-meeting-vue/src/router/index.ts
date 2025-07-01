@@ -8,15 +8,47 @@ const router = createRouter({
       path: '/',
       name: 'home',
       component: HomeView,
+      meta: {
+        title: '首页',
+        icon: 'House'
+      }
     },
     {
-      path: '/about',
-      name: 'about',
-      // route level code-splitting
-      // this generates a separate chunk (About.[hash].js) for this route
-      // which is lazy-loaded when the route is visited.
-      component: () => import('../views/AboutView.vue'),
+      path: '/recordings',
+      name: 'recordings',
+      component: () => import('../views/RecordingsView.vue'),
+      meta: {
+        title: '我的记录',
+        icon: 'Folder'
+      }
     },
+    {
+      path: '/realtime',
+      name: 'realtime',
+      component: () => import('../views/RealtimeView.vue'),
+      meta: {
+        title: '实时转写',
+        icon: 'Microphone'
+      }
+    },
+    {
+      path: '/upload',
+      name: 'upload',
+      component: () => import('../views/UploadView.vue'),
+      meta: {
+        title: '上传音视频',
+        icon: 'Upload'
+      }
+    },
+    {
+      path: '/settings',
+      name: 'settings',
+      component: () => import('../views/SettingsView.vue'),
+      meta: {
+        title: '设置',
+        icon: 'Setting'
+      }
+    }
   ],
 })
 

@@ -1,35 +1,130 @@
 @import './base.css';
 
+/* 全局样式重置和基础设置 */
 #app {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
+  margin: 0;
+  padding: 0;
   font-weight: normal;
+  height: 100vh;
+  overflow: hidden;
 }
 
-a,
-.green {
+/* 美化滚动条样式 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 3px;
+  transition: background 0.3s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.25);
+}
+
+/* Element Plus 组件样式覆盖 */
+.el-card {
+  box-shadow: 0 4px 12px 0 rgba(0, 0, 0, 0.05) !important;
+  border: none !important;
+  border-radius: 12px !important;
+}
+
+.el-button {
+  font-weight: 500;
+  border-radius: 8px;
+}
+
+.el-card__body {
+  padding: 24px !important;
+}
+
+.el-card__header {
+  padding: 20px 24px !important;
+  background: rgba(64, 158, 255, 0.02);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+/* 通用工具类 */
+.text-center {
+  text-align: center;
+}
+
+.text-left {
+  text-align: left;
+}
+
+.text-right {
+  text-align: right;
+}
+
+.full-width {
+  width: 100%;
+}
+
+.full-height {
+  height: 100%;
+}
+
+/* 间距工具类 */
+.m-0 { margin: 0 !important; }
+.mt-2 { margin-top: 8px !important; }
+.mt-4 { margin-top: 16px !important; }
+.mb-2 { margin-bottom: 8px !important; }
+.mb-4 { margin-bottom: 16px !important; }
+.p-2 { padding: 8px !important; }
+.p-4 { padding: 16px !important; }
+
+/* 链接样式 */
+a {
   text-decoration: none;
-  color: hsla(160, 100%, 37%, 1);
-  transition: 0.4s;
-  padding: 3px;
+  color: #409eff;
+  transition: color 0.3s ease;
 }
 
-@media (hover: hover) {
-  a:hover {
-    background-color: hsla(160, 100%, 37%, 0.2);
-  }
+a:hover {
+  color: #66b1ff;
 }
 
-@media (min-width: 1024px) {
-  body {
-    display: flex;
-    place-items: center;
-  }
+/* 动画效果 */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
 
-  #app {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    padding: 0 2rem;
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+.slide-fade-enter-active {
+  transition: all 0.3s ease-out;
+}
+
+.slide-fade-leave-active {
+  transition: all 0.8s cubic-bezier(1.0, 0.5, 0.8, 1.0);
+}
+
+.slide-fade-enter-from,
+.slide-fade-leave-to {
+  transform: translateX(20px);
+  opacity: 0;
+}
+
+/* 响应式样式 */
+@media (max-width: 768px) {
+  .el-card__body {
+    padding: 16px !important;
+  }
+  
+  .el-card__header {
+    padding: 16px !important;
   }
 }

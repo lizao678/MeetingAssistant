@@ -1,0 +1,607 @@
+<script setup lang="ts">
+import { ref, reactive } from 'vue'
+import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
+
+const router = useRouter()
+
+// 上传配置
+const uploadConfig = reactive({
+  language: 'zh', // 识别语言
+  enableSpeakerDiarization: true, // 说话人分离
+  enablePunctuation: true, // 智能标点
+  enableNumberConversion: true, // 数字转换
+  outputFormat: 'txt', // 输出格式
+  speakerCount: 0 // 预期说话人数量（0表示自动识别）
+})
+
+// 支持的语言
+const languages = [
+  { label: '中文', value: 'zh' },
+  { label: '英语', value: 'en' },
+  { label: '日语', value: 'ja' },
+  { label: '韩语', value: 'ko' },
+  { label: '俄语', value: 'ru' },
+  { label: '法语', value: 'fr' },
+  { label: '德语', value: 'de' }
+]
+
+// 输出格式选项
+const outputFormats = [
+  { label: 'TXT 文本', value: 'txt' },
+  { label: 'Word 文档', value: 'docx' },
+  { label: 'PDF 文档', value: 'pdf' },
+  { label: 'SRT 字幕', value: 'srt' },
+  { label: 'JSON 数据', value: 'json' }
+]
+
+// 上传文件列表
+const fileList = ref([])
+const uploadProgress = ref(0)
+const isUploading = ref(false)
+
+// 文件格式限制
+const allowedTypes = [
+  'audio/mpeg', 'audio/wav', 'audio/mp3', 'audio/flac', 'audio/aac',
+  'video/mp4', 'video/avi', 'video/mov', 'video/wmv', 'video/flv'
+]
+
+// 最大文件大小 (500MB)
+const maxFileSize = 500 * 1024 * 1024
+
+// 处理文件上传前的检查
+const beforeUpload = (file: File) => {
+  // 检查文件类型
+  if (!allowedTypes.includes(file.type)) {
+    ElMessage.error('不支持的文件格式！请上传音频或视频文件。')
+    return false
+  }
+  
+  // 检查文件大小
+  if (file.size > maxFileSize) {
+    ElMessage.error('文件大小不能超过 500MB！')
+    return false
+  }
+  
+  return true
+}
+
+// 处理文件上传
+const handleUpload = (options: any) => {
+  const { file } = options
+  
+  isUploading.value = true
+  uploadProgress.value = 0
+  
+  // 模拟上传进度
+  const progressInterval = setInterval(() => {
+    uploadProgress.value += Math.random() * 15
+    if (uploadProgress.value >= 100) {
+      uploadProgress.value = 100
+      clearInterval(progressInterval)
+      
+      setTimeout(() => {
+        isUploading.value = false
+        ElMessage.success('上传完成，开始转写处理...')
+        
+        // 跳转到处理结果页面
+        const recordId = 'upload_' + Date.now()
+        router.push(`/summary/${recordId}`)
+      }, 500)
+    }
+  }, 200)
+}
+
+// 移除文件
+const handleRemove = (file: any, fileList: any[]) => {
+  ElMessage.info('文件已移除')
+}
+
+// 文件超出限制
+const handleExceed = () => {
+  ElMessage.warning('最多只能上传一个文件')
+}
+
+// 快速配置预设
+const quickConfigs = [
+  {
+    name: '会议记录',
+    description: '多人会议，自动识别说话人',
+    config: {
+      language: 'zh',
+      enableSpeakerDiarization: true,
+      enablePunctuation: true,
+      enableNumberConversion: true,
+      outputFormat: 'docx',
+      speakerCount: 0
+    }
+  },
+  {
+    name: '访谈录音',
+    description: '一对一访谈，高精度转写',
+    config: {
+      language: 'zh',
+      enableSpeakerDiarization: true,
+      enablePunctuation: true,
+      enableNumberConversion: false,
+      outputFormat: 'txt',
+      speakerCount: 2
+    }
+  },
+  {
+    name: '讲座课程',
+    description: '单人讲述，保留完整内容',
+    config: {
+      language: 'zh',
+      enableSpeakerDiarization: false,
+      enablePunctuation: true,
+      enableNumberConversion: true,
+      outputFormat: 'pdf',
+      speakerCount: 1
+    }
+  },
+  {
+    name: '视频字幕',
+    description: '生成字幕文件，时间轴精确',
+    config: {
+      language: 'zh',
+      enableSpeakerDiarization: false,
+      enablePunctuation: true,
+      enableNumberConversion: false,
+      outputFormat: 'srt',
+      speakerCount: 0
+    }
+  }
+]
+
+// 应用快速配置
+const applyQuickConfig = (config: any) => {
+  Object.assign(uploadConfig, config)
+  ElMessage.success('配置已应用')
+}
+
+// 重置配置
+const resetConfig = () => {
+  uploadConfig.language = 'zh'
+  uploadConfig.enableSpeakerDiarization = true
+  uploadConfig.enablePunctuation = true
+  uploadConfig.enableNumberConversion = true
+  uploadConfig.outputFormat = 'txt'
+  uploadConfig.speakerCount = 0
+  ElMessage.info('配置已重置')
+}
+</script>
+
+<template>
+  <div class="upload-view">
+    <!-- 页面头部 -->
+    <div class="page-header">
+      <div class="header-content">
+        <div class="header-left">
+          <h1 class="page-title">
+            <el-icon><Upload /></el-icon>
+            上传音视频
+          </h1>
+          <p class="page-subtitle">上传音频或视频文件，自动转写为文字</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="upload-content">
+      <el-row :gutter="24">
+        <!-- 左侧：文件上传区域 -->
+        <el-col :span="14">
+          <el-card class="upload-card" shadow="never">
+            <template #header>
+              <div class="card-header">
+                <h3>文件上传</h3>
+                <el-text type="info">支持 MP3、WAV、MP4、AVI 等常见音视频格式</el-text>
+              </div>
+            </template>
+
+            <!-- 上传组件 -->
+            <div class="upload-section">
+              <el-upload
+                class="upload-dragger"
+                drag
+                :before-upload="beforeUpload"
+                :http-request="handleUpload"
+                :on-remove="handleRemove"
+                :on-exceed="handleExceed"
+                :file-list="fileList"
+                :limit="1"
+                accept="audio/*,video/*"
+              >
+                <div class="upload-content-area">
+                  <el-icon class="upload-icon" size="48">
+                    <Upload />
+                  </el-icon>
+                  <div class="upload-text">
+                    <p>将文件拖拽到此处，或<em>点击上传</em></p>
+                    <p class="upload-tip">文件大小不超过 500MB</p>
+                  </div>
+                </div>
+              </el-upload>
+
+              <!-- 上传进度 -->
+              <div v-if="isUploading" class="upload-progress">
+                <el-progress
+                  :percentage="uploadProgress"
+                  :stroke-width="8"
+                  status="success"
+                />
+                <p class="progress-text">正在上传文件...</p>
+              </div>
+            </div>
+
+            <!-- 支持格式说明 -->
+            <div class="format-info">
+              <h4>支持的文件格式</h4>
+              <div class="format-list">
+                <el-tag type="info" effect="plain">MP3</el-tag>
+                <el-tag type="info" effect="plain">WAV</el-tag>
+                <el-tag type="info" effect="plain">FLAC</el-tag>
+                <el-tag type="info" effect="plain">AAC</el-tag>
+                <el-tag type="info" effect="plain">MP4</el-tag>
+                <el-tag type="info" effect="plain">AVI</el-tag>
+                <el-tag type="info" effect="plain">MOV</el-tag>
+                <el-tag type="info" effect="plain">WMV</el-tag>
+              </div>
+            </div>
+          </el-card>
+        </el-col>
+
+        <!-- 右侧：配置选项 -->
+        <el-col :span="10">
+          <el-card class="config-card" shadow="never">
+            <template #header>
+              <div class="card-header">
+                <h3>转写设置</h3>
+                <el-button text @click="resetConfig">重置</el-button>
+              </div>
+            </template>
+
+            <!-- 快速配置 -->
+            <div class="quick-config-section">
+              <h4>快速配置</h4>
+              <div class="quick-config-grid">
+                <div
+                  v-for="config in quickConfigs"
+                  :key="config.name"
+                  class="quick-config-item"
+                  @click="applyQuickConfig(config.config)"
+                >
+                  <h5>{{ config.name }}</h5>
+                  <p>{{ config.description }}</p>
+                </div>
+              </div>
+            </div>
+
+            <el-divider />
+
+            <!-- 详细配置 -->
+            <div class="detail-config-section">
+              <h4>详细配置</h4>
+              
+              <el-form :model="uploadConfig" label-width="120px" size="default">
+                <el-form-item label="识别语言">
+                  <el-select v-model="uploadConfig.language" style="width: 100%">
+                    <el-option
+                      v-for="lang in languages"
+                      :key="lang.value"
+                      :label="lang.label"
+                      :value="lang.value"
+                    />
+                  </el-select>
+                </el-form-item>
+
+                <el-form-item label="说话人分离">
+                  <el-switch
+                    v-model="uploadConfig.enableSpeakerDiarization"
+                    active-text="开启"
+                    inactive-text="关闭"
+                  />
+                  <div class="config-tip">
+                    自动识别并标记不同说话人
+                  </div>
+                </el-form-item>
+
+                <el-form-item label="说话人数量" v-if="uploadConfig.enableSpeakerDiarization">
+                  <el-input-number
+                    v-model="uploadConfig.speakerCount"
+                    :min="0"
+                    :max="20"
+                    style="width: 100%"
+                  />
+                  <div class="config-tip">
+                    0 表示自动识别说话人数量
+                  </div>
+                </el-form-item>
+
+                <el-form-item label="智能标点">
+                  <el-switch
+                    v-model="uploadConfig.enablePunctuation"
+                    active-text="开启"
+                    inactive-text="关闭"
+                  />
+                  <div class="config-tip">
+                    自动添加标点符号和语句分段
+                  </div>
+                </el-form-item>
+
+                <el-form-item label="数字转换">
+                  <el-switch
+                    v-model="uploadConfig.enableNumberConversion"
+                    active-text="开启"
+                    inactive-text="关闭"
+                  />
+                  <div class="config-tip">
+                    将语音中的数字转换为阿拉伯数字
+                  </div>
+                </el-form-item>
+
+                <el-form-item label="输出格式">
+                  <el-select v-model="uploadConfig.outputFormat" style="width: 100%">
+                    <el-option
+                      v-for="format in outputFormats"
+                      :key="format.value"
+                      :label="format.label"
+                      :value="format.value"
+                    />
+                  </el-select>
+                </el-form-item>
+              </el-form>
+            </div>
+          </el-card>
+        </el-col>
+      </el-row>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.upload-view {
+  min-height: 100vh;
+  background: #f5f7fa;
+}
+
+/* 页面头部 */
+.page-header {
+  background: white;
+  border-bottom: 1px solid #e4e7ed;
+  padding: 24px 0;
+}
+
+.header-content {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+.page-title {
+  font-size: 28px;
+  font-weight: 600;
+  color: #303133;
+  margin: 0 0 8px 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.page-subtitle {
+  color: #606266;
+  margin: 0;
+  font-size: 14px;
+}
+
+/* 主要内容 */
+.upload-content {
+  max-width: 1200px;
+  margin: 24px auto;
+  padding: 0 24px;
+}
+
+/* 卡片样式 */
+.upload-card,
+.config-card {
+  border-radius: 12px;
+  border: 1px solid #e4e7ed;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.card-header h3 {
+  font-size: 18px;
+  font-weight: 600;
+  color: #303133;
+  margin: 0;
+}
+
+/* 上传区域 */
+.upload-section {
+  margin-bottom: 24px;
+}
+
+:deep(.upload-dragger) {
+  width: 100%;
+}
+
+:deep(.el-upload-dragger) {
+  width: 100%;
+  height: 200px;
+  border: 2px dashed #d9d9d9;
+  border-radius: 12px;
+  background: #fafafa;
+  transition: all 0.3s;
+}
+
+:deep(.el-upload-dragger:hover) {
+  border-color: #409eff;
+  background: #f0f9ff;
+}
+
+.upload-content-area {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 20px;
+}
+
+.upload-icon {
+  color: #c0c4cc;
+  margin-bottom: 16px;
+}
+
+.upload-text p {
+  margin: 0 0 8px 0;
+  color: #606266;
+  font-size: 16px;
+}
+
+.upload-text em {
+  color: #409eff;
+  font-style: normal;
+}
+
+.upload-tip {
+  font-size: 14px !important;
+  color: #909399 !important;
+}
+
+/* 上传进度 */
+.upload-progress {
+  margin-top: 24px;
+  padding: 20px;
+  background: #f8f9fa;
+  border-radius: 8px;
+}
+
+.progress-text {
+  text-align: center;
+  color: #606266;
+  margin: 8px 0 0 0;
+}
+
+/* 格式信息 */
+.format-info {
+  padding: 20px;
+  background: #f8f9fa;
+  border-radius: 8px;
+}
+
+.format-info h4 {
+  font-size: 14px;
+  color: #303133;
+  margin: 0 0 12px 0;
+}
+
+.format-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* 快速配置 */
+.quick-config-section {
+  margin-bottom: 20px;
+}
+
+.quick-config-section h4 {
+  font-size: 16px;
+  color: #303133;
+  margin: 0 0 16px 0;
+}
+
+.quick-config-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.quick-config-item {
+  padding: 16px;
+  border: 1px solid #e4e7ed;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.3s;
+  background: white;
+}
+
+.quick-config-item:hover {
+  border-color: #409eff;
+  background: #f0f9ff;
+}
+
+.quick-config-item h5 {
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+  margin: 0 0 4px 0;
+}
+
+.quick-config-item p {
+  font-size: 12px;
+  color: #909399;
+  margin: 0;
+  line-height: 1.4;
+}
+
+/* 详细配置 */
+.detail-config-section h4 {
+  font-size: 16px;
+  color: #303133;
+  margin: 0 0 20px 0;
+}
+
+.config-tip {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
+/* 响应式设计 */
+@media (max-width: 1024px) {
+  .upload-content .el-row {
+    flex-direction: column;
+  }
+  
+  .upload-content .el-col {
+    width: 100% !important;
+    margin-bottom: 16px;
+  }
+
+  .quick-config-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .upload-content {
+    padding: 0 16px;
+  }
+
+  :deep(.el-upload-dragger) {
+    height: 160px;
+  }
+
+  .upload-content-area {
+    padding: 16px;
+  }
+
+  .upload-icon {
+    font-size: 36px !important;
+  }
+
+  .upload-text p {
+    font-size: 14px;
+  }
+}
+</style> 
