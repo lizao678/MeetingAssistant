@@ -310,6 +310,8 @@ class AIService:
                 "quality": 2,
                 "word_count": len(summary),
                 "key_points": [],
+                "compression_ratio": len(summary) / len(text) if len(text) > 0 else 1.0,
+                "summary_type": "meeting",
                 "fallback": True
             }
         except Exception:
@@ -318,6 +320,8 @@ class AIService:
                 "quality": 1,
                 "word_count": 0,
                 "key_points": [],
+                "compression_ratio": 0.0,
+                "summary_type": "meeting",
                 "fallback": True
             }
     
