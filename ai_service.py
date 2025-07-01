@@ -132,12 +132,12 @@ class AIService:
             logger.error(f"生成摘要时出错: {str(e)}")
             return self._fallback_summary(text)
     
-    async def extract_keywords(self, text: str, max_keywords: int = 20) -> List[Dict[str, Any]]:
+    async def extract_keywords(self, text: str, max_keywords: int = 8) -> List[Dict[str, Any]]:
         """提取关键词
         
         Args:
             text: 原始文本
-            max_keywords: 最大关键词数量
+            max_keywords: 最大关键词数量（默认8个，更精准）
             
         Returns:
             关键词列表，包含词语、频次和重要性评分
@@ -146,15 +146,26 @@ class AIService:
             if not text or len(text.strip()) < 20:
                 return []
             
+            # 扩展停用词列表
+            extended_stop_words = self.stop_words | {
+                '情况', '时候', '方面', '问题', '东西', '地方', '时间', '样子', '事情',
+                '方式', '过程', '结果', '原因', '因为', '所以', '然后', '现在', '这样',
+                '那样', '一个', '这个', '那个', '什么', '怎么', '为什么', '如何',
+                '基本', '主要', '重要', '一般', '特别', '比较', '非常', '一些',
+                '很多', '少数', '全部', '部分', '大部分', '小部分', '左右', '左边', '右边'
+            }
+            
             # 使用jieba进行分词和词性标注
             words = pseg.cut(text)
             
-            # 过滤有意义的词
+            # 更严格的词汇过滤，只保留核心名词和动词
             meaningful_words = []
             for word, flag in words:
-                if (len(word) >= 2 and 
-                    word not in self.stop_words and
-                    flag in ['n', 'nr', 'ns', 'nt', 'nz', 'v', 'vn', 'a', 'ad', 'an']):  # 名词、动词、形容词
+                if (2 <= len(word) <= 6 and  # 长度限制，避免过短或过长的词
+                    word not in extended_stop_words and
+                    flag in ['n', 'nr', 'ns', 'nt', 'nz', 'v', 'vn'] and  # 只保留名词和动词
+                    not word.isdigit() and  # 排除纯数字
+                    not re.match(r'^[a-zA-Z]+$', word)):  # 排除纯英文
                     meaningful_words.append(word)
             
             # 统计词频
@@ -163,37 +174,54 @@ class AIService:
             # 使用AI模型提取更精准的关键词
             ai_keywords = await self._ai_extract_keywords(text)
             
-            # 合并结果
+            # 合并结果，使用更精准的评分算法
             final_keywords = []
             processed_words = set()
             
-            # 优先处理AI提取的关键词
+            # 优先处理AI提取的关键词（提高权重）
             for ai_word in ai_keywords:
                 if ai_word in word_freq and ai_word not in processed_words:
-                    score = min(0.9, word_freq[ai_word] / len(meaningful_words) * 10)
+                    # AI关键词使用更高的基础分数
+                    base_score = 0.8
+                    freq_score = min(0.2, word_freq[ai_word] / max(len(meaningful_words), 1) * 20)
+                    length_bonus = 0.1 if 3 <= len(ai_word) <= 4 else 0  # 中等长度加分
+                    final_score = min(0.95, base_score + freq_score + length_bonus)
+                    
                     final_keywords.append({
                         "word": ai_word,
                         "count": word_freq[ai_word],
-                        "score": score,
+                        "score": final_score,
                         "source": "ai"
                     })
                     processed_words.add(ai_word)
             
-            # 添加高频词
-            for word, count in word_freq.most_common(max_keywords * 2):
-                if word not in processed_words:
-                    score = min(0.8, count / len(meaningful_words) * 10)
-                    final_keywords.append({
-                        "word": word,
-                        "count": count,
-                        "score": score,
-                        "source": "freq"
-                    })
-                    processed_words.add(word)
+            # 只在AI关键词不足时才添加高频词
+            if len(final_keywords) < max_keywords:
+                remaining_slots = max_keywords - len(final_keywords)
+                for word, count in word_freq.most_common():
+                    if word not in processed_words and len(final_keywords) < max_keywords:
+                        # 高频词使用较低的基础分数
+                        if count >= 2:  # 至少出现2次才考虑
+                            base_score = 0.4
+                            freq_score = min(0.3, count / max(len(meaningful_words), 1) * 15)
+                            length_bonus = 0.1 if 3 <= len(word) <= 4 else 0
+                            final_score = min(0.8, base_score + freq_score + length_bonus)
+                            
+                            final_keywords.append({
+                                "word": word,
+                                "count": count,
+                                "score": final_score,
+                                "source": "freq"
+                            })
+                            processed_words.add(word)
             
-            # 按评分排序并限制数量
+            # 按评分排序并限制数量，确保质量
             final_keywords.sort(key=lambda x: x["score"], reverse=True)
-            return final_keywords[:max_keywords]
+            
+            # 过滤掉评分过低的关键词
+            quality_keywords = [kw for kw in final_keywords if kw["score"] >= 0.3]
+            
+            return quality_keywords[:max_keywords]
             
         except Exception as e:
             logger.error(f"提取关键词时出错: {str(e)}")
@@ -202,14 +230,18 @@ class AIService:
     async def _ai_extract_keywords(self, text: str) -> List[str]:
         """使用AI模型提取关键词"""
         try:
-            prompt = f"""请从以下文本中提取最重要的关键词，要求：
-1. 提取5-10个最核心的关键词
-2. 关键词应该是名词、动词或重要概念
-3. 避免通用词汇，关注专业术语和核心概念
-4. 只返回关键词，用逗号分隔
+            prompt = f"""请从以下对话或会议内容中提取最重要的关键词。
 
-文本：
-{text[:2000]}
+要求：
+1. 只提取3-6个最核心的关键词
+2. 关键词必须是具体的名词、专业术语或核心概念
+3. 避免以下词汇：情况、时候、方面、问题、东西、地方、时间、基本、主要、重要等
+4. 优先选择：产品名称、技术术语、具体功能、专业概念
+5. 关键词长度控制在2-4个汉字
+6. 只返回关键词，用逗号分隔，不要其他解释
+
+文本内容：
+{text[:1500]}
 
 关键词："""
 
@@ -217,14 +249,25 @@ class AIService:
                 Generation.call,
                 model='qwen-turbo',
                 prompt=prompt,
-                max_tokens=100,
-                temperature=0.1
+                max_tokens=80,
+                temperature=0.0  # 降低随机性，提高一致性
             )
             
             if response.status_code == 200:
                 keywords_text = response.output.text.strip()
+                # 清理返回的文本，去除可能的标点符号干扰
+                keywords_text = re.sub(r'[。！？；：\n\r]', '', keywords_text)
                 keywords = [kw.strip() for kw in keywords_text.split(',') if kw.strip()]
-                return keywords[:10]
+                
+                # 进一步过滤，确保质量
+                filtered_keywords = []
+                for kw in keywords:
+                    if (2 <= len(kw) <= 4 and 
+                        not kw.isdigit() and
+                        kw not in {'情况', '时候', '方面', '问题', '东西', '地方', '时间', '基本', '主要', '重要'}):
+                        filtered_keywords.append(kw)
+                
+                return filtered_keywords[:6]
             else:
                 return []
                 
@@ -328,18 +371,40 @@ class AIService:
     def _fallback_keywords(self, text: str, max_keywords: int) -> List[Dict[str, Any]]:
         """降级关键词提取方案"""
         try:
-            words = jieba.cut(text)
-            meaningful_words = [w for w in words if len(w) >= 2 and w not in self.stop_words]
+            # 扩展停用词列表（与主函数保持一致）
+            extended_stop_words = self.stop_words | {
+                '情况', '时候', '方面', '问题', '东西', '地方', '时间', '样子', '事情',
+                '方式', '过程', '结果', '原因', '因为', '所以', '然后', '现在', '这样',
+                '那样', '一个', '这个', '那个', '什么', '怎么', '为什么', '如何',
+                '基本', '主要', '重要', '一般', '特别', '比较', '非常', '一些',
+                '很多', '少数', '全部', '部分', '大部分', '小部分', '左右', '左边', '右边'
+            }
+            
+            # 使用jieba进行词性标注
+            words = pseg.cut(text)
+            meaningful_words = []
+            
+            # 严格过滤词汇
+            for word, flag in words:
+                if (2 <= len(word) <= 4 and 
+                    word not in extended_stop_words and
+                    flag in ['n', 'nr', 'ns', 'nt', 'nz', 'v', 'vn'] and
+                    not word.isdigit() and
+                    not re.match(r'^[a-zA-Z]+$', word)):
+                    meaningful_words.append(word)
+            
             word_freq = Counter(meaningful_words)
             
             keywords = []
-            for word, count in word_freq.most_common(max_keywords):
-                keywords.append({
-                    "word": word,
-                    "count": count,
-                    "score": min(0.7, count / len(meaningful_words) * 10),
-                    "source": "fallback"
-                })
+            for word, count in word_freq.most_common():
+                if count >= 2 and len(keywords) < max_keywords:  # 至少出现2次
+                    score = min(0.6, count / max(len(meaningful_words), 1) * 8)
+                    keywords.append({
+                        "word": word,
+                        "count": count,
+                        "score": score,
+                        "source": "fallback"
+                    })
             
             return keywords
         except Exception:

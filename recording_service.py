@@ -175,7 +175,7 @@ class RecordingProcessor:
             
             # 5. 提取关键词
             logger.info("开始提取关键词")
-            keywords_result = await ai_service.extract_keywords(full_text)
+            keywords_result = await ai_service.extract_keywords(full_text, max_keywords=8)
             logger.info(f"关键词提取结果: {len(keywords_result) if keywords_result else 0} 个关键词")
             
             if keywords_result:
@@ -329,8 +329,34 @@ class RecordingProcessor:
                 chunk_duration = len(chunk) / sample_rate
                 
                 # ASR转录
-                asr_result = await asr_async(chunk, sample_rate, language)
-                if not asr_result or not asr_result.get("text"):
+                cache_asr = {}  # 为每个chunk创建独立的缓存
+                asr_result = await asr_async(chunk, language, cache_asr, True)
+                
+                # 处理ASR结果 - 可能是列表格式
+                if not asr_result:
+                    current_time += chunk_duration
+                    continue
+                
+                # 如果是列表，取第一个结果
+                if isinstance(asr_result, list):
+                    if not asr_result or not asr_result[0].get("text"):
+                        current_time += chunk_duration
+                        continue
+                    asr_data = asr_result[0]
+                else:
+                    # 如果是字典
+                    if not asr_result.get("text"):
+                        current_time += chunk_duration
+                        continue
+                    asr_data = asr_result
+                
+                # 提取文本内容，去除SenseVoice的特殊标记
+                text_content = asr_data.get("text", "")
+                # 去除类似 <|zh|><|NEUTRAL|><|Speech|><|withitn|> 的标记
+                import re
+                text_content = re.sub(r'<\|[^|]+\|>', '', text_content).strip()
+                
+                if not text_content:
                     current_time += chunk_duration
                     continue
                 
@@ -339,11 +365,11 @@ class RecordingProcessor:
                 
                 # 合并结果
                 segment_data = {
-                    "content": asr_result["text"],
+                    "content": text_content,
                     "start_time": current_time,
                     "end_time": current_time + chunk_duration,
                     "speaker_id": speaker_result.get("speaker_id", "发言人A"),
-                    "confidence": asr_result.get("confidence", 0.8)
+                    "confidence": asr_data.get("avg_logprob", 0.8)
                 }
                 
                 all_segments.append(segment_data)

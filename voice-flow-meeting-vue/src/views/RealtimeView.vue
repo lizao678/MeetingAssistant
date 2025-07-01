@@ -199,6 +199,7 @@ const messagesContainer = ref<HTMLElement>()
 const recordingDuration = ref(0) // 已录制时长(秒)
 const maxRecordingDuration = ref(3600) // 最大录音时长(秒) - 1小时
 let recordingTimer: number | null = null
+let completeAudioBuffer: Float32Array[] = [] // 新增：保存完整录音数据
 
 // WebSocket和录音相关
 let ws: WebSocket | null = null
@@ -372,6 +373,9 @@ const createPCMRecorder = (stream: MediaStream) => {
     input(data: Float32Array) {
       this.buffer.push(new Float32Array(data))
       this.size += data.length
+      
+      // 同时保存到完整缓冲区
+      completeAudioBuffer.push(new Float32Array(data))
     },
     encodePCM() {
       const bytes = new Float32Array(this.size)
@@ -443,8 +447,77 @@ const createPCMRecorder = (stream: MediaStream) => {
     },
     clear() {
       audioData.clear()
+    },
+    // 新增：获取完整音频数据
+    getCompleteAudioWAV() {
+      return createWAVBlob(completeAudioBuffer, outputSampleRate)
     }
   }
+}
+
+// 新增：创建WAV格式音频文件
+const createWAVBlob = (audioBuffers: Float32Array[], sampleRate: number) => {
+  // 计算总长度
+  let totalLength = 0
+  for (const buffer of audioBuffers) {
+    totalLength += buffer.length
+  }
+  
+  // 合并所有音频数据
+  const mergedBuffer = new Float32Array(totalLength)
+  let offset = 0
+  for (const buffer of audioBuffers) {
+    mergedBuffer.set(buffer, offset)
+    offset += buffer.length
+  }
+  
+  // 转换为16位PCM
+  const pcmData = new Int16Array(mergedBuffer.length)
+  for (let i = 0; i < mergedBuffer.length; i++) {
+    const s = Math.max(-1, Math.min(1, mergedBuffer[i]))
+    pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7FFF
+  }
+  
+  // 创建WAV文件头
+  const channels = 1
+  const bitsPerSample = 16
+  const byteRate = sampleRate * channels * bitsPerSample / 8
+  const blockAlign = channels * bitsPerSample / 8
+  const dataSize = pcmData.length * 2
+  const fileSize = 44 + dataSize
+  
+  const arrayBuffer = new ArrayBuffer(fileSize)
+  const view = new DataView(arrayBuffer)
+  
+  // WAV文件头
+  const writeString = (offset: number, string: string) => {
+    for (let i = 0; i < string.length; i++) {
+      view.setUint8(offset + i, string.charCodeAt(i))
+    }
+  }
+  
+  writeString(0, 'RIFF')
+  view.setUint32(4, fileSize - 8, true)
+  writeString(8, 'WAVE')
+  writeString(12, 'fmt ')
+  view.setUint32(16, 16, true) // fmt chunk size
+  view.setUint16(20, 1, true) // audio format (PCM)
+  view.setUint16(22, channels, true)
+  view.setUint32(24, sampleRate, true)
+  view.setUint32(28, byteRate, true)
+  view.setUint16(32, blockAlign, true)
+  view.setUint16(34, bitsPerSample, true)
+  writeString(36, 'data')
+  view.setUint32(40, dataSize, true)
+  
+  // 写入PCM数据
+  let dataOffset = 44
+  for (let i = 0; i < pcmData.length; i++) {
+    view.setInt16(dataOffset, pcmData[i], true)
+    dataOffset += 2
+  }
+  
+  return new Blob([arrayBuffer], { type: 'audio/wav' })
 }
 
 // 切换录音状态
@@ -540,6 +613,9 @@ const startRecording = async () => {
   try {
     isConnecting.value = true
     
+    // 清空之前的音频数据
+    completeAudioBuffer = []
+    
     // 获取音频流
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
@@ -597,27 +673,21 @@ const startRecording = async () => {
       }
     }
     
-        ws.onerror = (error) => {
-      console.error('WebSocket错误:', error)
-      ElMessage.error('连接失败，请检查网络')
-      stopRecording(false) // 已经显示了错误消息，不需要再显示"录音已停止"
-    }
-
-    ws.onclose = () => {
-      console.log('WebSocket连接已关闭')
-      // 只有在非正常关闭时才显示消息
-      if (isRecording.value) {
-        ElMessage.warning('连接已断开，录音已停止')
-        stopRecording(false) // 已经显示了断开消息，不需要再显示"录音已停止"
-      } else {
-        stopRecording(false) // 正常关闭，不显示消息
-      }
+    ws.onerror = (error) => {
+      console.error('WebSocket连接错误:', error)
+      isConnecting.value = false
+      ElMessage.error('连接失败，请检查网络设置')
     }
     
-  } catch (error) {
+    ws.onclose = () => {
+      console.log('WebSocket连接已关闭')
+      isConnecting.value = false
+    }
+    
+  } catch (error: any) {
     console.error('启动录音失败:', error)
-    ElMessage.error('无法访问麦克风，请检查权限设置')
     isConnecting.value = false
+    ElMessage.error(`录音启动失败: ${error.message}`)
   }
 }
 
@@ -635,6 +705,15 @@ const stopRecording = async (showMessage = true) => {
   
   stopRecordingTimer()
   
+  // 保存最终的完整音频数据（在销毁recorder之前）
+  let finalAudioBlob: Blob | undefined = undefined
+  if (recorder && completeAudioBuffer.length > 0) {
+    finalAudioBlob = recorder.getCompleteAudioWAV()
+    if (finalAudioBlob) {
+      console.log('保存最终音频数据，大小:', finalAudioBlob.size)
+    }
+  }
+  
   // 停止录音器
   if (recorder) {
     recorder.stop()
@@ -648,12 +727,12 @@ const stopRecording = async (showMessage = true) => {
   }
   
   // 如果有录音内容且需要显示消息，则显示发言人选择弹窗
-  if (showMessage && messages.value.length > 0 && recordingDuration.value > 3) {
+  if (showMessage && messages.value.length > 0 && recordingDuration.value > 3 && finalAudioBlob) {
     // 准备录音数据
     currentRecordingData.value = {
       duration: recordingDuration.value,
       language: selectedLang.value,
-      audioBlob: undefined, // TODO: 需要获取录音的Blob数据
+      audioBlob: finalAudioBlob, // 使用保存的音频数据
       messages: [...messages.value]
     }
     
@@ -661,6 +740,9 @@ const stopRecording = async (showMessage = true) => {
     showSpeakerDialog.value = true
   } else if (showMessage) {
     ElMessage.info(`录音已停止，总时长: ${formattedDuration.value}`)
+    
+    // 如果没有显示弹窗，清空音频缓冲区
+    completeAudioBuffer = []
   }
 }
 
@@ -711,14 +793,20 @@ const handleSpeakerDialogConfirm = async (data: any) => {
       background: 'rgba(0, 0, 0, 0.7)'
     })
     
-    // 创建一个虚拟的音频文件（包含转写文本）
-    // 在实际实现中，这里应该是录音过程中收集的真实音频数据
-    const transcriptText = messages.value.map(msg => `${msg.speakerId}: ${msg.text}`).join('\n')
-    const audioBlob = new Blob([transcriptText], { type: 'audio/wav' })
+    // 检查是否有录音数据
+    if (!currentRecordingData.value?.audioBlob) {
+      loading.close()
+      ElMessage.error('没有录音数据可以保存')
+      return
+    }
     
-    // 创建一个模拟的音频文件，用于演示（修改文件类型以通过后端验证）
+    // 使用保存的音频数据
+    const audioBlob = currentRecordingData.value.audioBlob
+    console.log('使用保存的WAV音频文件，大小:', audioBlob.size)
+    
+    // 创建真实的音频文件
     const audioFile = new File([audioBlob], `recording_${Date.now()}.wav`, { 
-      type: 'audio/wav',  // 修改为音频类型以通过后端验证
+      type: 'audio/wav',
       lastModified: Date.now() 
     })
     
@@ -749,6 +837,13 @@ const handleSpeakerDialogConfirm = async (data: any) => {
       speakerMap.clear()
       speakerCounter = 0
       recordingDuration.value = 0
+      completeAudioBuffer = []
+      currentRecordingData.value = {
+        duration: 0,
+        language: 'zh',
+        audioBlob: undefined,
+        messages: []
+      }
       
       // 跳转到录音详情页
       setTimeout(() => {

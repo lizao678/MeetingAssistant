@@ -37,4 +37,5 @@ python-multipart
 # 离线高精度处理
 openai-whisper
 librosa
-pyannote.audio
+scipy  # 用于音频重采样
+# 注意：已移除pyannote.audio，使用现有CAM++模型进行说话人分离

@@ -319,8 +319,37 @@ const handleEnded = () => {
 }
 
 const handleError = (error: Event) => {
-  ElMessage.error('音频加载失败')
-  console.error('Audio error:', error)
+  const audioEl = error.target as HTMLAudioElement
+  const errorCode = audioEl.error?.code
+  const errorMessage = audioEl.error?.message
+  
+  let userMessage = '音频加载失败'
+  
+  // 根据错误代码提供更具体的错误信息
+  switch (errorCode) {
+    case 1: // MEDIA_ERR_ABORTED
+      userMessage = '音频加载被中止'
+      break
+    case 2: // MEDIA_ERR_NETWORK
+      userMessage = '网络错误，无法加载音频'
+      break
+    case 3: // MEDIA_ERR_DECODE
+      userMessage = '音频文件格式不支持或已损坏'
+      break
+    case 4: // MEDIA_ERR_SRC_NOT_SUPPORTED
+      userMessage = '音频文件格式不支持'
+      break
+    default:
+      userMessage = `音频加载失败: ${errorMessage || '未知错误'}`
+  }
+  
+  ElMessage.error(userMessage)
+  console.error('Audio error details:', {
+    code: errorCode,
+    message: errorMessage,
+    src: audioEl.src,
+    error: error
+  })
 }
 
 // 监听播放状态

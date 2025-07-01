@@ -3,6 +3,7 @@ SenseVoice 实时语音识别服务 - 主服务器文件
 """
 
 import argparse
+import asyncio
 import traceback
 import json
 import time
@@ -335,18 +336,45 @@ async def get_offline_processing_status(recording_id: str):
 async def download_recording(recording_id: str):
     """下载录音文件"""
     try:
+        logger.info(f"开始下载录音文件: {recording_id}")
+        
         recording = db_manager.get_recording(recording_id)
         if not recording:
+            logger.error(f"录音记录不存在: {recording_id}")
             raise HTTPException(status_code=404, detail="录音记录不存在")
         
         file_path = recording.get("filePath")
-        if not file_path or not os.path.exists(file_path):
-            raise HTTPException(status_code=404, detail="录音文件不存在")
+        logger.info(f"获取到文件路径: {file_path}")
+        
+        if not file_path:
+            logger.error(f"录音记录 {recording_id} 没有文件路径")
+            raise HTTPException(status_code=404, detail="录音文件路径不存在")
+            
+        if not os.path.exists(file_path):
+            logger.error(f"录音文件不存在于路径: {file_path}")
+            raise HTTPException(status_code=404, detail=f"录音文件不存在: {file_path}")
+        
+        # 确定正确的媒体类型
+        if file_path.lower().endswith('.wav'):
+            media_type = 'audio/wav'
+        elif file_path.lower().endswith('.mp3'):
+            media_type = 'audio/mpeg'
+        elif file_path.lower().endswith('.m4a'):
+            media_type = 'audio/mp4'
+        else:
+            media_type = 'audio/wav'  # 默认为wav
+        
+        # 获取原始文件名
+        original_filename = os.path.basename(file_path)
         
         return FileResponse(
             path=file_path,
-            filename=recording["title"],
-            media_type='application/octet-stream'
+            filename=original_filename,
+            media_type=media_type,
+            headers={
+                "Content-Disposition": f'inline; filename="{original_filename}"',
+                "Accept-Ranges": "bytes"
+            }
         )
         
     except HTTPException:

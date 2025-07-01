@@ -219,11 +219,14 @@
 
     <!-- 底部音频播放器 -->
     <div class="audio-player-section">
-      <!-- TODO: 集成AudioPlayer组件 -->
-      <div class="audio-placeholder">
-        <el-icon size="48" color="#c0c4cc"><Headphone /></el-icon>
-        <p>音频播放器组件开发中...</p>
-      </div>
+      <AudioPlayer
+        :audio-url="recordingDetail.audioUrl"
+        :segments="audioSegments"
+        :current-time="currentPlayTime"
+        @time-update="handleTimeUpdate"
+        @segment-play="handleSegmentPlay"
+        @play-state-change="handlePlayStateChange"
+      />
     </div>
   </div>
 </template>
@@ -234,7 +237,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
 import recordingService from '@/services/recordingService'
 import type { RecordingDetail, SpeechSegment, IntelligentSummary, Keyword } from '@/services/recordingService'
-// import AudioPlayer from '../components/AudioPlayer.vue'
+import AudioPlayer from '@/components/AudioPlayer.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -317,6 +320,19 @@ const filteredSegments = computed(() => {
     }))
 })
 
+// 音频播放器专用的段落数据（转换格式以适配AudioPlayer组件）
+const audioSegments = computed(() => {
+  return segments.value.map((segment, index) => ({
+    id: segment.id || index + 1,
+    speakerName: segment.speakerName,
+    speakerNumber: segment.speakerNumber ? parseInt(segment.speakerNumber) : 1,
+    speakerColor: segment.speakerColor,
+    startTime: segment.startTime,
+    endTime: segment.endTime,
+    text: segment.content || segment.text
+  }))
+})
+
 // 方法
 const goBack = () => {
   router.back()
@@ -352,12 +368,13 @@ const handleSearch = () => {
 
 const playSegment = (segment: any) => {
   currentPlayingSegment.value = segment.id
-  // TODO: 触发音频播放器跳转到指定时间
+  // 设置播放时间，AudioPlayer组件会监听currentPlayTime的变化
+  currentPlayTime.value = segment.startTime
 }
 
 const jumpToChapter = (startTime: number) => {
   currentPlayTime.value = startTime
-  // TODO: 触发音频播放器跳转
+  // 音频播放器会通过watch监听currentPlayTime的变化
 }
 
 const copyTranscript = async () => {
@@ -549,6 +566,8 @@ const loadRecordingDetail = async () => {
         status: recording.status
       }
       
+      console.log('音频URL:', recordingDetail.value.audioUrl)
+      
       // 转换段落数据格式（后端已返回驼峰格式，直接使用）
       segments.value = rawSegments.map((segment: any, index) => ({
         ...segment,
@@ -575,17 +594,114 @@ const loadRecordingDetail = async () => {
   } catch (error: any) {
     console.error('加载录音详情失败:', error)
     
-    if (error.response?.status === 404) {
-      ElMessage.error('录音记录不存在')
-      router.push('/recordings')
-    } else if (error.response?.status === 500) {
-      ElMessage.error('服务器错误，请稍后重试')
+    // 开发模式下，提供演示数据
+    if (import.meta.env.DEV) {
+      console.log('开发模式：使用演示数据')
+      loadDemoData()
     } else {
-      ElMessage.error(`加载失败: ${error.message || '未知错误'}`)
+      if (error.response?.status === 404) {
+        ElMessage.error('录音记录不存在')
+        router.push('/recordings')
+      } else if (error.response?.status === 500) {
+        ElMessage.error('服务器错误，请稍后重试')
+      } else {
+        ElMessage.error(`加载失败: ${error.message || '未知错误'}`)
+      }
     }
   } finally {
     loading.value = false
   }
+}
+
+// 加载演示数据（用于开发和测试）
+const loadDemoData = () => {
+  console.log('加载演示数据...')
+  
+  recordingDetail.value = {
+    id: recordingId,
+    title: '演示录音 - 项目讨论会议',
+    duration: 120, // 2分钟
+    language: '中文',
+    createTime: '2025-01-01 16:30',
+    speakerCount: 2,
+    audioUrl: 'https://www.soundjay.com/misc/sounds/bell-ringing-05.wav', // 示例音频
+    status: 'completed'
+  }
+  
+  segments.value = [
+    {
+      id: 1,
+      speakerId: 'SPEAKER_00',
+      speakerName: '发言人1',
+      speakerNumber: '1',
+      speakerColor: '#1890ff',
+      content: '大家好，今天我们来讨论一下项目的进展情况。',
+      text: '大家好，今天我们来讨论一下项目的进展情况。',
+      startTime: 0,
+      endTime: 5,
+      confidence: 0.95,
+      highlightedText: ''
+    },
+    {
+      id: 2,
+      speakerId: 'SPEAKER_01',
+      speakerName: '发言人2',
+      speakerNumber: '2',
+      speakerColor: '#52c41a',
+      content: '好的，我来汇报一下技术方面的进展。目前前端开发已经完成了80%。',
+      text: '好的，我来汇报一下技术方面的进展。目前前端开发已经完成了80%。',
+      startTime: 6,
+      endTime: 12,
+      confidence: 0.92,
+      highlightedText: ''
+    },
+    {
+      id: 3,
+      speakerId: 'SPEAKER_00',
+      speakerName: '发言人1',
+      speakerNumber: '1',
+      speakerColor: '#1890ff',
+      content: '很好，那后端的API接口开发情况如何？',
+      text: '很好，那后端的API接口开发情况如何？',
+      startTime: 13,
+      endTime: 18,
+      confidence: 0.90,
+      highlightedText: ''
+    },
+    {
+      id: 4,
+      speakerId: 'SPEAKER_01',
+      speakerName: '发言人2',
+      speakerNumber: '2',
+      speakerColor: '#52c41a',
+      content: '后端接口基本完成，正在进行联调测试。预计本周内可以完成所有功能。',
+      text: '后端接口基本完成，正在进行联调测试。预计本周内可以完成所有功能。',
+      startTime: 19,
+      endTime: 26,
+      confidence: 0.93,
+      highlightedText: ''
+    }
+  ]
+  
+  summary.value = {
+    content: '本次会议主要讨论了项目开发进展。前端开发已完成80%，后端API开发基本完成，正在进行联调测试，预计本周内完成所有功能开发。',
+    quality: 4,
+    wordCount: 156,
+    keyPoints: ['前端开发进展', '后端API接口', '联调测试', '完成时间'],
+    summaryType: 'meeting'
+  }
+  
+  keywords.value = [
+    { word: '项目', count: 5, score: 0.9, source: 'ai' },
+    { word: '开发', count: 4, score: 0.8, source: 'ai' },
+    { word: '前端', count: 3, score: 0.7, source: 'ai' },
+    { word: '后端', count: 3, score: 0.7, source: 'ai' },
+    { word: '接口', count: 2, score: 0.6, source: 'ai' },
+    { word: '测试', count: 2, score: 0.5, source: 'ai' }
+  ]
+  
+  generateChapters()
+  ElMessage.success('演示数据加载完成')
 }
 
 // 生成章节数据
@@ -904,24 +1020,13 @@ onUnmounted(() => {
 }
 
 .audio-player-section {
+  position: sticky;
+  bottom: 0;
   background: white;
   border-top: 1px solid #e4e7ed;
   padding: 16px 24px;
-}
-
-.audio-placeholder {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 40px 20px;
-  color: #909399;
-  text-align: center;
-}
-
-.audio-placeholder p {
-  margin: 12px 0 0 0;
-  font-size: 14px;
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.1);
+  z-index: 100;
 }
 
 .empty-state {
