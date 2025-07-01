@@ -37,6 +37,9 @@ class Config(BaseSettings):
     # 线程池配置
     thread_pool_max_workers: int = Field(4, description="Maximum number of threads in the thread pool")
     
+    # 硬件配置
+    use_gpu: bool = Field(True, description="Whether to use GPU for model inference")
+    
     # 缓冲区配置
     audio_buffer_max_size: int = Field(100, description="Maximum size of audio buffer")
     vad_buffer_duration_seconds: int = Field(10, description="VAD buffer duration in seconds")

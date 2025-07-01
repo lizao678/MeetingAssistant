@@ -257,45 +257,60 @@ class OfflineAudioProcessor:
             return None
     
     async def _offline_transcribe(self, audio_data: np.ndarray, file_path: str) -> Dict[str, Any]:
-        """离线语音识别"""
+        """离线语音识别 - 使用SenseVoice高精度模式"""
         try:
-            if self.whisper_model is None:
-                # 降级方案：使用现有的SenseVoice
-                return await self._fallback_transcribe(file_path)
+            logger.info("使用SenseVoice离线高精度转写...")
             
-            # 使用Whisper进行转写
-            logger.info("使用Whisper进行离线转写...")
+            # 使用SenseVoice进行高精度转写
+            # 更小的分段，更高精度的处理
+            segment_duration = 15.0  # 15秒一段，提高精度
+            segment_samples = int(segment_duration * self.sample_rate)
             
-            # Whisper需要音频文件路径
-            result = await asyncio.to_thread(
-                self.whisper_model.transcribe,
-                file_path,
-                language='zh',  # 指定中文
-                task='transcribe',
-                word_timestamps=True,  # 获取词级时间戳
-                initial_prompt="以下是中文语音对话内容。"  # 中文提示
-            )
+            all_segments = []
+            current_time = 0.0
             
-            # 处理结果
-            segments = []
-            for segment in result["segments"]:
-                segments.append({
-                    "start": segment["start"],
-                    "end": segment["end"],
-                    "text": segment["text"].strip(),
-                    "confidence": 0.9,  # Whisper置信度较高
-                    "words": segment.get("words", [])
-                })
+            for i in range(0, len(audio_data), segment_samples):
+                chunk = audio_data[i:i + segment_samples]
+                chunk_duration = len(chunk) / self.sample_rate
+                
+                if len(chunk) < self.sample_rate * 0.5:  # 跳过太短的片段
+                    break
+                
+                # 使用现有的ASR模型进行转写，启用高精度选项
+                cache_asr = {}
+                asr_result = await asr_async(chunk, "zh", cache_asr, True)  # 启用ITN
+                
+                if asr_result and len(asr_result) > 0:
+                    # 提取文本内容，去除SenseVoice的特殊标记
+                    import re
+                    text_content = asr_result[0].get("text", "")
+                    text_content = re.sub(r'<\|[^|]+\|>', '', text_content).strip()
+                    
+                    if text_content:
+                        all_segments.append({
+                            "start": current_time,
+                            "end": current_time + chunk_duration,
+                            "text": text_content,
+                            "confidence": abs(asr_result[0].get("avg_logprob", 0.8)),
+                            "words": []  # SenseVoice暂不支持词级时间戳
+                        })
+                
+                current_time += chunk_duration
+            
+            # 合并连续的短段落
+            merged_segments = self._merge_short_segments(all_segments)
+            
+            full_text = " ".join([seg["text"] for seg in merged_segments])
             
             return {
-                "segments": segments,
-                "language": result.get("language", "zh"),
-                "duration": audio_data.shape[0] / self.sample_rate,
-                "full_text": result["text"]
+                "segments": merged_segments,
+                "language": "zh",
+                "duration": len(audio_data) / self.sample_rate,
+                "full_text": full_text
             }
             
         except Exception as e:
-            logger.error(f"Whisper转写失败: {e}")
+            logger.error(f"SenseVoice离线转写失败: {e}")
             return await self._fallback_transcribe(file_path)
     
     async def _offline_speaker_diarization(
@@ -385,18 +400,30 @@ class OfflineAudioProcessor:
     ) -> str:
         """使用CAM++模型识别说话人"""
         try:
+            # 准备说话人识别参数
+            speaker_gallery = speaker_embeddings.get("gallery", {})
+            speaker_counter = speaker_embeddings.get("counter", 0)
+            speaker_history = speaker_embeddings.get("history", [])
+            current_speaker = speaker_embeddings.get("current_speaker", None)
+            sv_thr = 0.4  # 说话人识别阈值
+            
             # 使用现有的说话人识别系统
-            result = await diarize_speaker_online_improved_async(
-                segment_audio, self.sample_rate, speaker_embeddings
+            speaker_id, updated_gallery, updated_counter, updated_history, updated_current = await diarize_speaker_online_improved_async(
+                segment_audio, 
+                speaker_gallery, 
+                speaker_counter,
+                sv_thr,
+                speaker_history,
+                current_speaker
             )
             
-            if result and result.get("speaker_id"):
-                return result["speaker_id"]
-            else:
-                # 如果识别失败，基于音频特征判断
-                return await self._audio_feature_based_identification(
-                    segment_audio, speaker_embeddings, current_speaker_id
-                )
+            # 更新speaker_embeddings
+            speaker_embeddings["gallery"] = updated_gallery
+            speaker_embeddings["counter"] = updated_counter
+            speaker_embeddings["history"] = updated_history
+            speaker_embeddings["current_speaker"] = updated_current
+            
+            return speaker_id
                 
         except Exception as e:
             logger.warning(f"CAM++识别失败，使用特征分析: {e}")
@@ -587,6 +614,42 @@ class OfflineAudioProcessor:
                 current_segment = segment.copy()
         
         merged.append(current_segment)
+        return merged
+    
+    def _merge_short_segments(self, segments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """合并过短的文本段落"""
+        if not segments:
+            return []
+        
+        merged = []
+        current_segment = None
+        
+        for segment in segments:
+            # 如果当前段落为空，直接使用
+            if current_segment is None:
+                current_segment = segment.copy()
+                continue
+            
+            # 如果当前段落太短（少于5个字符）或时间间隔很短，尝试合并
+            should_merge = (
+                len(current_segment["text"]) < 5 or  # 文本太短
+                segment["start"] - current_segment["end"] < 1.0  # 时间间隔小于1秒
+            )
+            
+            if should_merge:
+                # 合并段落
+                current_segment["text"] += " " + segment["text"]
+                current_segment["end"] = segment["end"]
+                current_segment["confidence"] = (current_segment["confidence"] + segment["confidence"]) / 2
+            else:
+                # 保存当前段落，开始新段落
+                merged.append(current_segment)
+                current_segment = segment.copy()
+        
+        # 添加最后一个段落
+        if current_segment:
+            merged.append(current_segment)
+        
         return merged
 
     async def _fallback_transcribe(self, file_path: str) -> Dict[str, Any]:

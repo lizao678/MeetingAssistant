@@ -43,15 +43,15 @@ def initialize_models():
     )
     logger.info("说话人验证模型(CAM++)加载完成")
     
-    # 加载语音识别模型
+    # 加载语音识别模型 - 目前只有Small版本可用
     model_asr = AutoModel(
         model="iic/SenseVoiceSmall",
         trust_remote_code=True,
         remote_code="./model.py",
-        device="cuda:0",
+        device="cuda:0" if config.use_gpu else "cpu",
         disable_update=True
     )
-    logger.info("语音识别模型加载完成")
+    logger.info("语音识别模型(SenseVoiceSmall)加载完成")
     
     # 加载VAD模型
     model_vad = AutoModel(
