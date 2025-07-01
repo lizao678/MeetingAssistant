@@ -29,6 +29,7 @@ from text_processing import format_str_v3, contains_chinese_english_number
 from recording_service import recording_processor
 from database import db_manager
 from ai_service import ai_service
+from offline_processor import offline_processor
 
 
 # 设置日志
@@ -273,6 +274,61 @@ async def regenerate_summary(recording_id: str, request: RegenerateSummaryReques
     except Exception as e:
         logger.error(f"重新生成摘要失败: {str(e)}")
         raise HTTPException(status_code=500, detail=f"重新生成摘要失败: {str(e)}")
+
+
+@app.post("/api/recordings/{recording_id}/offline-reprocess")
+async def offline_reprocess_recording(recording_id: str):
+    """离线重新处理录音（高精度）"""
+    try:
+        logger.info(f"开始离线重新处理录音: {recording_id}")
+        
+        # 检查录音是否存在
+        recording = db_manager.get_recording(recording_id)
+        if not recording:
+            raise HTTPException(status_code=404, detail="录音记录不存在")
+        
+        # 异步启动离线处理
+        asyncio.create_task(offline_processor.reprocess_recording(recording_id))
+        
+        return {
+            "success": True,
+            "message": "离线重新处理已启动，请稍后查看结果",
+            "recording_id": recording_id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"启动离线重新处理失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"启动失败: {str(e)}")
+
+
+@app.get("/api/recordings/{recording_id}/offline-status")
+async def get_offline_processing_status(recording_id: str):
+    """获取离线处理状态"""
+    try:
+        recording = db_manager.get_recording(recording_id)
+        if not recording:
+            raise HTTPException(status_code=404, detail="录音记录不存在")
+        
+        # 检查是否已经离线处理过
+        segments = db_manager.get_segments(recording_id)
+        has_offline_processed = any(
+            segment.get("offline_processed", False) for segment in segments
+        )
+        
+        return {
+            "recording_id": recording_id,
+            "status": recording["status"],
+            "has_offline_processed": has_offline_processed,
+            "can_reprocess": recording["status"] in ["completed", "offline_completed"]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取离线处理状态失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取状态失败: {str(e)}")
 
 
 @app.get("/api/recordings/{recording_id}/download")

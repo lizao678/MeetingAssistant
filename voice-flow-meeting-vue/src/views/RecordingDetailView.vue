@@ -24,6 +24,15 @@
       </div>
       <div class="header-actions">
         <el-space>
+          <el-button 
+            v-if="canOfflineReprocess" 
+            type="primary" 
+            :icon="'Refresh'" 
+            :loading="offlineProcessing"
+            @click="startOfflineReprocess"
+          >
+            {{ hasOfflineProcessed ? '重新离线处理' : '离线高精度处理' }}
+          </el-button>
           <el-button :icon="'Download'" @click="downloadRecording">下载录音</el-button>
           <el-button :icon="'Share'" @click="shareRecording">分享</el-button>
           <el-dropdown trigger="click">
@@ -282,6 +291,11 @@ const currentPlayingSegment = ref<number | null>(null)
 const currentPlayTime = ref(0)
 const transcriptContainer = ref<HTMLElement>()
 
+// 离线处理状态
+const offlineProcessing = ref(false)
+const canOfflineReprocess = ref(false)
+const hasOfflineProcessed = ref(false)
+
 // 过滤后的段落
 const filteredSegments = computed(() => {
   if (!searchText.value.trim()) {
@@ -414,6 +428,63 @@ const downloadRecording = async () => {
 const shareRecording = () => {
   ElMessage.info('生成分享链接...')
   // TODO: 实现分享功能
+}
+
+// 离线重处理功能
+const startOfflineReprocess = async () => {
+  try {
+    await ElMessageBox.confirm(
+      '离线重新处理将使用更精确的AI模型重新识别语音和说话人，这会花费一些时间。是否继续？',
+      '离线高精度处理',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'info'
+      }
+    )
+    
+    offlineProcessing.value = true
+    
+    const response = await recordingService.offlineReprocessRecording(recordingId)
+    
+    if (response.success) {
+      ElMessage.success(response.message || '离线重新处理已启动')
+      
+      // 定期检查处理状态
+      checkOfflineProcessingStatus()
+    } else {
+      ElMessage.error('启动离线重新处理失败')
+    }
+    
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      ElMessage.error(`离线重新处理失败: ${error.message || '未知错误'}`)
+      console.error('离线重新处理失败:', error)
+    }
+  } finally {
+    offlineProcessing.value = false
+  }
+}
+
+const checkOfflineProcessingStatus = async () => {
+  try {
+    const response = await recordingService.getOfflineProcessingStatus(recordingId)
+    
+    hasOfflineProcessed.value = response.has_offline_processed
+    canOfflineReprocess.value = response.can_reprocess
+    
+    // 如果状态是offline_completed，重新加载数据
+    if (response.status === 'offline_completed') {
+      await loadRecordingDetail()
+      ElMessage.success('离线重新处理完成，页面已更新')
+    } else if (response.status === 'processing') {
+      // 继续检查状态
+      setTimeout(checkOfflineProcessingStatus, 3000)
+    }
+    
+  } catch (error) {
+    console.error('检查离线处理状态失败:', error)
+  }
 }
 
 // 音频播放器事件处理
@@ -549,6 +620,7 @@ const generateChapters = () => {
 // 生命周期
 onMounted(() => {
   loadRecordingDetail()
+  checkOfflineProcessingStatus()
 })
 
 onUnmounted(() => {

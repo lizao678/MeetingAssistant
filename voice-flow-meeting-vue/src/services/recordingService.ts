@@ -239,6 +239,25 @@ class RecordingService {
     return http.delete(`/api/recordings/${id}`)
   }
 
+  // 离线重新处理录音（高精度）
+  async offlineReprocessRecording(id: string): Promise<{
+    success: boolean
+    message: string
+    recording_id?: string
+  }> {
+    return http.post(`/api/recordings/${id}/offline-reprocess`)
+  }
+
+  // 获取离线处理状态
+  async getOfflineProcessingStatus(id: string): Promise<{
+    recording_id: string
+    status: string
+    has_offline_processed: boolean
+    can_reprocess: boolean
+  }> {
+    return http.get(`/api/recordings/${id}/offline-status`)
+  }
+
   // 搜索录音
   async searchRecordings(query: string): Promise<Recording[]> {
     return http.get('/api/recordings/search', { params: { q: query } })

@@ -33,3 +33,8 @@ sqlalchemy
 
 # 文件处理
 python-multipart
+
+# 离线高精度处理
+openai-whisper
+librosa
+pyannote.audio
