@@ -35,14 +35,6 @@
               inactive-text="不区分"
               style="--el-switch-on-color: #13ce66"
             />
-            
-            <!-- 智能换行开关 -->
-            <el-switch
-              v-model="smartLineBreak"
-              active-text="智能换行"
-              inactive-text="传统模式"
-              style="--el-switch-on-color: #409eff"
-            />
           </el-space>
         </div>
       </div>
@@ -141,13 +133,12 @@ const isRecording = ref(false)
 const isConnecting = ref(false)
 const selectedLang = ref('auto')
 const speakerVerification = ref(true)
-const smartLineBreak = ref(true)
 const messages = ref<AudioMessage[]>([])
 const messagesContainer = ref<HTMLElement>()
 
 // WebSocket和录音相关
 let ws: WebSocket | null = null
-let mediaRecorder: MediaRecorder | null = null
+let recorder: any = null
 let audioContext: AudioContext | null = null
 let timeInterval: number | null = null
 
@@ -205,6 +196,9 @@ const getSpeakerInfo = (speakerId: string): SpeakerInfo => {
 const addMessage = (data: any) => {
   const speakerInfo = getSpeakerInfo(data.speaker_id || '发言人1')
   
+  // 正确处理换行逻辑：如果后端明确返回false，就不换行；否则默认换行
+  const shouldNewLine = data.is_new_line !== undefined ? data.is_new_line : true
+  
   const message: AudioMessage = {
     id: Date.now(),
     text: data.data || data.text || '',
@@ -219,19 +213,28 @@ const addMessage = (data: any) => {
       second: '2-digit'
     }),
     confidence: data.confidence || 0,
-    isNewLine: data.is_new_line || true,
+    isNewLine: shouldNewLine,
     segmentType: data.segment_type || 'continue'
   }
   
-  // 如果是同一个说话人且不需要换行，则追加到最后一条消息
+  // 智能换行逻辑：
+  // 1. 如果需要换行 (shouldNewLine = true)，总是创建新消息
+  // 2. 如果不需要换行 (shouldNewLine = false)，且是同一说话人，则追加到最后一条消息
   const lastMessage = messages.value[messages.value.length - 1]
-  if (!message.isNewLine && 
+  
+  if (!shouldNewLine && 
       lastMessage && 
-      lastMessage.speakerId === message.speakerId) {
-    lastMessage.text += ' ' + message.text
+      lastMessage.speakerId === message.speakerId &&
+      lastMessage.text.trim() !== '') {
+    // 追加到现有消息，用空格分隔
+    lastMessage.text += (lastMessage.text.endsWith(' ') ? '' : ' ') + message.text
     lastMessage.timestamp = message.timestamp
+    lastMessage.confidence = message.confidence
+    console.log(`追加消息: ${message.text} (说话人: ${message.speakerId})`)
   } else {
+    // 创建新消息
     messages.value.push(message)
+    console.log(`新消息: ${message.text} (说话人: ${message.speakerId}, 换行: ${shouldNewLine})`)
   }
   
   // 自动滚动到底部
@@ -240,6 +243,102 @@ const addMessage = (data: any) => {
       messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
     }
   })
+}
+
+// 创建PCM录音器
+const createPCMRecorder = (stream: MediaStream) => {
+  const sampleBits = 16 // 采样位数
+  const inputSampleRate = 48000 // 输入采样率
+  const outputSampleRate = 16000 // 输出采样率
+  const channelCount = 1 // 单声道
+  
+  const context = new AudioContext()
+  const audioInput = context.createMediaStreamSource(stream)
+  const scriptProcessor = context.createScriptProcessor(4096, channelCount, channelCount)
+  
+  const audioData = {
+    size: 0,
+    buffer: [] as Float32Array[],
+    clear() {
+      this.buffer = []
+      this.size = 0
+    },
+    input(data: Float32Array) {
+      this.buffer.push(new Float32Array(data))
+      this.size += data.length
+    },
+    encodePCM() {
+      const bytes = new Float32Array(this.size)
+      let offset = 0
+      for (let i = 0; i < this.buffer.length; i++) {
+        bytes.set(this.buffer[i], offset)
+        offset += this.buffer[i].length
+      }
+      
+      const dataLength = bytes.length * (sampleBits / 8)
+      const buffer = new ArrayBuffer(dataLength)
+      const data = new DataView(buffer)
+      offset = 0
+      
+      for (let i = 0; i < bytes.length; i++, offset += 2) {
+        const s = Math.max(-1, Math.min(1, bytes[i]))
+        data.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true)
+      }
+      
+      return new Blob([data], { type: 'audio/pcm' })
+    }
+  }
+  
+  // 降采样函数
+  const downsampleBuffer = (buffer: Float32Array, inputSampleRate: number, outputSampleRate: number) => {
+    if (outputSampleRate === inputSampleRate) {
+      return buffer
+    }
+    const sampleRateRatio = inputSampleRate / outputSampleRate
+    const newLength = Math.round(buffer.length / sampleRateRatio)
+    const result = new Float32Array(newLength)
+    let offsetResult = 0
+    let offsetBuffer = 0
+    
+    while (offsetResult < result.length) {
+      const nextOffsetBuffer = Math.round((offsetResult + 1) * sampleRateRatio)
+      let accum = 0
+      let count = 0
+      for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++) {
+        accum += buffer[i]
+        count++
+      }
+      result[offsetResult] = accum / count
+      offsetResult++
+      offsetBuffer = nextOffsetBuffer
+    }
+    return result
+  }
+  
+  scriptProcessor.onaudioprocess = (e) => {
+    const resampledData = downsampleBuffer(
+      e.inputBuffer.getChannelData(0),
+      inputSampleRate,
+      outputSampleRate
+    )
+    audioData.input(resampledData)
+  }
+  
+  return {
+    start() {
+      audioInput.connect(scriptProcessor)
+      scriptProcessor.connect(context.destination)
+    },
+    stop() {
+      scriptProcessor.disconnect()
+    },
+    getBlob() {
+      return audioData.encodePCM()
+    },
+    clear() {
+      audioData.clear()
+    }
+  }
 }
 
 // 切换录音状态
@@ -261,7 +360,7 @@ const startRecording = async () => {
       audio: {
         echoCancellation: true,
         noiseSuppression: true,
-        sampleRate: 16000
+        sampleRate: 48000 // 使用默认采样率，后续降采样到16kHz
       }
     })
     
@@ -280,18 +379,21 @@ const startRecording = async () => {
       isConnecting.value = false
       isRecording.value = true
       
-      // 开始录音
-      mediaRecorder = new MediaRecorder(stream, {
-        mimeType: 'audio/webm;codecs=opus'
-      })
+      // 创建PCM录音器
+      recorder = createPCMRecorder(stream)
+      recorder.start()
       
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0 && ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(event.data)
+      // 定时发送音频数据
+      timeInterval = setInterval(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          const audioBlob = recorder.getBlob()
+          if (audioBlob.size > 0) {
+            console.log('发送音频数据，大小:', audioBlob.size)
+            ws.send(audioBlob)
+            recorder.clear()
+          }
         }
-      }
-      
-      mediaRecorder.start(500) // 每500ms发送一次数据
+      }, 500)
       
       ElMessage.success('开始录音')
     }
@@ -336,18 +438,22 @@ const stopRecording = async (showMessage = true) => {
   isRecording.value = false
   isConnecting.value = false
   
-  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-    mediaRecorder.stop()
+  // 停止定时器
+  if (timeInterval) {
+    clearInterval(timeInterval)
+    timeInterval = null
   }
   
+  // 停止录音器
+  if (recorder) {
+    recorder.stop()
+    recorder = null
+  }
+  
+  // 关闭WebSocket连接
   if (ws) {
     ws.close()
     ws = null
-  }
-  
-  // 停止所有音频轨道
-  if (mediaRecorder && mediaRecorder.stream) {
-    mediaRecorder.stream.getTracks().forEach(track => track.stop())
   }
   
   if (showMessage) {
