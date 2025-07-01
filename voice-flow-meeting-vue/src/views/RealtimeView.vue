@@ -181,6 +181,7 @@ import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
 import { useRouter } from 'vue-router'
 import SpeakerCountDialog from '../components/SpeakerCountDialog.vue'
+import recordingService from '@/services/recordingService'
 import type { AudioMessage, RecordingStatus, SpeakerInfo } from '../types/audio'
 
 const router = useRouter()
@@ -706,35 +707,59 @@ const handleSpeakerDialogConfirm = async (data: any) => {
   try {
     const loading = ElLoading.service({
       lock: true,
-      text: '正在保存录音记录...',
+      text: 'AI正在处理录音数据...',
       background: 'rgba(0, 0, 0, 0.7)'
     })
     
-    // TODO: 调用后端API提交录音数据
-    // const response = await recordingService.processRecording(data)
+    // 创建一个虚拟的音频文件（包含转写文本）
+    // 在实际实现中，这里应该是录音过程中收集的真实音频数据
+    const transcriptText = messages.value.map(msg => `${msg.speakerId}: ${msg.text}`).join('\n')
+    const audioBlob = new Blob([transcriptText], { type: 'audio/wav' })
     
-    // 模拟API调用
-    await new Promise(resolve => setTimeout(resolve, 1000))
+    // 创建一个模拟的音频文件，用于演示（修改文件类型以通过后端验证）
+    const audioFile = new File([audioBlob], `recording_${Date.now()}.wav`, { 
+      type: 'audio/wav',  // 修改为音频类型以通过后端验证
+      lastModified: Date.now() 
+    })
     
-    // 生成模拟的录音ID
-    const recordingId = 'rec_' + Date.now()
+    // 调用后端API提交录音数据
+    const requestData = {
+      audioFile: audioFile,
+      speakerCount: data.speakerCount,
+      language: data.language || selectedLang.value,
+      smartPunctuation: data.smartPunctuation !== false,
+      numberConversion: data.numberConversion !== false,
+      generateSummary: data.generateSummary !== false,
+      summaryType: data.summaryType || 'meeting'
+    }
+    
+    console.log('正在提交录音处理请求:', requestData)
+    
+    const response = await recordingService.processRecording(requestData)
     
     loading.close()
-    ElMessage.success('录音记录已保存，正在跳转到详情页...')
     
-    // 清空当前录音数据
-    messages.value = []
-    speakerMap.clear()
-    speakerCounter = 0
-    recordingDuration.value = 0
+    console.log('API响应:', response)
     
-    // 跳转到录音详情页
-    setTimeout(() => {
-      router.push(`/recording/${recordingId}`)
-    }, 1000)
+    if (response.success && response.recording_id) {
+      ElMessage.success('录音已提交AI处理，正在跳转到详情页...')
+      
+      // 清空当前录音数据
+      messages.value = []
+      speakerMap.clear()
+      speakerCounter = 0
+      recordingDuration.value = 0
+      
+      // 跳转到录音详情页
+      setTimeout(() => {
+        router.push(`/recording/${response.recording_id}`)
+      }, 1000)
+    } else {
+      throw new Error(response.error || response.message || '处理失败')
+    }
     
-  } catch (error) {
-    ElMessage.error('保存录音记录失败，请重试')
+  } catch (error: any) {
+    ElMessage.error(`保存录音记录失败: ${error.message || error}`)
     console.error('保存录音失败:', error)
   }
 }

@@ -6,12 +6,13 @@ import argparse
 import traceback
 import json
 import time
+import os
 from typing import Optional
 from urllib.parse import parse_qs
 
 import uvicorn
 import numpy as np
-from fastapi import FastAPI, Request, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Depends
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -25,6 +26,9 @@ from model_service import model_service_lifespan, async_vad_generate, asr_async
 from audio_buffer import AudioBuffer, CircularAudioBuffer
 from speaker_recognition import diarize_speaker_online_improved_async
 from text_processing import format_str_v3, contains_chinese_english_number
+from recording_service import recording_processor
+from database import db_manager
+from ai_service import ai_service
 
 
 # 设置日志
@@ -40,6 +44,30 @@ class TranscriptionResponse(BaseModel):
     is_new_line: bool = False  # 是否需要换行
     segment_type: str = "continue"  # 段落类型: "new_speaker", "pause", "continue"
     timestamp: float = 0.0  # 时间戳
+
+
+class RecordingProcessRequest(BaseModel):
+    """录音处理请求模型"""
+    speaker_count: int
+    language: str = "zh"
+    smart_punctuation: bool = True
+    number_conversion: bool = True
+    generate_summary: bool = True
+    summary_type: str = "meeting"  # meeting, interview, lecture
+
+
+class RecordingProcessResponse(BaseModel):
+    """录音处理响应模型"""
+    success: bool
+    recording_id: Optional[str] = None
+    message: str
+    duration: Optional[float] = None
+    error: Optional[str] = None
+
+
+class RegenerateSummaryRequest(BaseModel):
+    """重新生成摘要请求模型"""
+    summary_type: str = "meeting"
 
 
 # 创建FastAPI应用
@@ -121,6 +149,190 @@ async def health_check():
             "thread_pool_workers": config.thread_pool_max_workers
         }
     }
+
+
+@app.post("/api/recordings/process", response_model=RecordingProcessResponse)
+async def process_recording(
+    audio_file: UploadFile = File(...),
+    speaker_count: int = Form(...),
+    language: str = Form("zh"),
+    smart_punctuation: bool = Form(True),
+    number_conversion: bool = Form(True),
+    generate_summary: bool = Form(True),
+    summary_type: str = Form("meeting")
+):
+    """提交录音进行处理"""
+    try:
+        # 验证文件类型
+        logger.info(f"收到文件上传请求: filename={audio_file.filename}, content_type={audio_file.content_type}, size={audio_file.size}")
+        if not audio_file.content_type or not audio_file.content_type.startswith(('audio/', 'video/')):
+            logger.error(f"文件类型验证失败: {audio_file.content_type}")
+            raise HTTPException(status_code=400, detail="请上传音频或视频文件")
+        
+        # 验证发言人数量
+        if speaker_count < 1 or speaker_count > 10:
+            raise HTTPException(status_code=400, detail="发言人数量必须在1-10之间")
+        
+        # 构建处理选项
+        options = {
+            "smart_punctuation": smart_punctuation,
+            "number_conversion": number_conversion,
+            "generate_summary": generate_summary,
+            "summary_type": summary_type
+        }
+        
+        # 处理录音
+        result = await recording_processor.process_recording(
+            audio_file=audio_file,
+            speaker_count=speaker_count,
+            language=language,
+            options=options
+        )
+        
+        return RecordingProcessResponse(**result)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"处理录音请求失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"处理失败: {str(e)}")
+
+
+@app.get("/api/recordings/{recording_id}/status")
+async def get_recording_status(recording_id: str):
+    """获取录音处理状态"""
+    try:
+        status = await recording_processor.get_recording_status(recording_id)
+        if "error" in status:
+            raise HTTPException(status_code=404, detail=status["error"])
+        return status
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取录音状态失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取状态失败: {str(e)}")
+
+
+@app.get("/api/recordings/{recording_id}/detail")
+async def get_recording_detail(recording_id: str):
+    """获取录音详情"""
+    try:
+        detail = db_manager.get_recording_detail(recording_id)
+        if not detail:
+            raise HTTPException(status_code=404, detail="录音记录不存在")
+        
+        return {
+            "success": True,
+            "data": detail
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取录音详情失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取详情失败: {str(e)}")
+
+
+@app.get("/api/recordings")
+async def get_recordings_list(page: int = 1, page_size: int = 20):
+    """获取录音列表"""
+    try:
+        if page < 1:
+            page = 1
+        if page_size < 1 or page_size > 100:
+            page_size = 20
+            
+        result = db_manager.get_recordings_list(page=page, page_size=page_size)
+        return {
+            "success": True,
+            "data": result
+        }
+        
+    except Exception as e:
+        logger.error(f"获取录音列表失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取列表失败: {str(e)}")
+
+
+@app.post("/api/recordings/{recording_id}/regenerate-summary")
+async def regenerate_summary(recording_id: str, request: RegenerateSummaryRequest):
+    """重新生成摘要"""
+    try:
+        result = await recording_processor.regenerate_summary(recording_id, request.summary_type)
+        
+        if "error" in result:
+            raise HTTPException(status_code=400, detail=result["error"])
+        
+        return {
+            "success": True,
+            "data": result
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"重新生成摘要失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"重新生成摘要失败: {str(e)}")
+
+
+@app.get("/api/recordings/{recording_id}/download")
+async def download_recording(recording_id: str):
+    """下载录音文件"""
+    try:
+        recording = db_manager.get_recording(recording_id)
+        if not recording:
+            raise HTTPException(status_code=404, detail="录音记录不存在")
+        
+        file_path = recording.get("filePath")
+        if not file_path or not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="录音文件不存在")
+        
+        return FileResponse(
+            path=file_path,
+            filename=recording["title"],
+            media_type='application/octet-stream'
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"下载录音文件失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"下载失败: {str(e)}")
+
+
+@app.delete("/api/recordings/{recording_id}")
+async def delete_recording(recording_id: str):
+    """删除录音记录"""
+    try:
+        recording = db_manager.get_recording(recording_id)
+        if not recording:
+            raise HTTPException(status_code=404, detail="录音记录不存在")
+        
+        # 删除文件
+        file_path = recording.get("filePath")
+        if file_path and os.path.exists(file_path):
+            os.remove(file_path)
+        
+        # 删除数据库记录 (通过级联删除相关数据)
+        from database import Recording
+        with db_manager.get_session() as session:
+            recording_obj = session.query(Recording).filter(
+                Recording.id == recording_id
+            ).first()
+            if recording_obj:
+                session.delete(recording_obj)
+                session.commit()
+        
+        return {
+            "success": True,
+            "message": "录音已删除"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"删除录音失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")
 
 
 @app.websocket("/ws/transcribe")

@@ -3,18 +3,79 @@ import http from './http'
 export interface Recording {
   id: string
   title: string
-  description: string
-  duration: string
-  fileSize: string
+  description?: string
+  duration: number // 改为数字类型，单位秒
+  fileSize?: string
   createTime: string
   updateTime: string
   status: 'completed' | 'processing' | 'failed'
   language: string
   speakerCount: number
-  tags: string[]
-  hasTranscript: boolean
-  hasSummary: boolean
-  preview: string
+  tags?: string[]
+  hasTranscript?: boolean
+  hasSummary?: boolean
+  preview?: string
+  filePath?: string
+  options?: Record<string, any>
+}
+
+// 发言段落接口
+export interface SpeechSegment {
+  id?: number
+  speakerId: string
+  speakerName: string
+  speakerColor: string
+  content: string
+  startTime: number
+  endTime: number
+  confidence?: number
+}
+
+// 智能摘要接口
+export interface IntelligentSummary {
+  content: string
+  quality: number
+  wordCount: number
+  keyPoints: string[]
+  compressionRatio?: number
+  summaryType: string
+  createTime?: string
+}
+
+// 关键词接口
+export interface Keyword {
+  word: string
+  count: number
+  score: number
+  source: string
+}
+
+// 录音详情接口
+export interface RecordingDetail {
+  recording: Recording
+  segments: SpeechSegment[]
+  summary: IntelligentSummary | null
+  keywords: Keyword[]
+}
+
+// 录音处理请求接口
+export interface RecordingProcessRequest {
+  audioFile: File
+  speakerCount: number
+  language: string
+  smartPunctuation: boolean
+  numberConversion: boolean
+  generateSummary: boolean
+  summaryType: string
+}
+
+// 录音处理响应接口
+export interface RecordingProcessResponse {
+  success: boolean
+  recording_id?: string  // 后端返回的字段名是下划线格式
+  message: string
+  duration?: number
+  error?: string
 }
 
 export interface RecordingFilter {
@@ -25,14 +86,70 @@ export interface RecordingFilter {
 }
 
 class RecordingService {
-  // 获取录音列表
-  async getRecordings(filter?: RecordingFilter): Promise<{
-    data: Recording[]
-    total: number
-    page: number
-    pageSize: number
+  // 处理录音文件（新API）
+  async processRecording(data: RecordingProcessRequest): Promise<RecordingProcessResponse> {
+    const formData = new FormData()
+    formData.append('audio_file', data.audioFile)
+    formData.append('speaker_count', data.speakerCount.toString())
+    formData.append('language', data.language)
+    formData.append('smart_punctuation', data.smartPunctuation.toString())
+    formData.append('number_conversion', data.numberConversion.toString())
+    formData.append('generate_summary', data.generateSummary.toString())
+    formData.append('summary_type', data.summaryType)
+
+    return http.post('/api/recordings/process', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    })
+  }
+
+  // 获取录音处理状态
+  async getRecordingStatus(recordingId: string): Promise<{
+    recordingId: string
+    status: string
+    title: string
+    duration?: number
+    createTime: string
   }> {
-    return http.get('/api/recordings', { params: filter })
+    return http.get(`/api/recordings/${recordingId}/status`)
+  }
+
+  // 获取录音完整详情（新API）
+  async getRecordingDetail(recordingId: string): Promise<{
+    success: boolean
+    data: RecordingDetail
+  }> {
+    return http.get(`/api/recordings/${recordingId}/detail`)
+  }
+
+  // 重新生成摘要
+  async regenerateSummary(recordingId: string, summaryType: string = 'meeting'): Promise<{
+    success: boolean
+    data: any
+  }> {
+    return http.post(`/api/recordings/${recordingId}/regenerate-summary`, {
+      summary_type: summaryType
+    })
+  }
+
+  // 获取录音列表
+  async getRecordings(filter?: RecordingFilter & { page?: number; page_size?: number }): Promise<{
+    success: boolean
+    data: {
+      recordings: Recording[]
+      total: number
+      page: number
+      pageSize: number
+      totalPages: number
+    }
+  }> {
+    const params = {
+      page: filter?.page || 1,
+      page_size: filter?.page_size || 20,
+      ...filter
+    }
+    return http.get('/api/recordings', { params })
   }
 
   // 获取单个录音详情
@@ -65,10 +182,7 @@ class RecordingService {
     return http.put(`/api/recordings/${id}`, data)
   }
 
-  // 删除录音
-  async deleteRecording(id: string): Promise<void> {
-    return http.delete(`/api/recordings/${id}`)
-  }
+
 
   // 获取录音转写结果
   async getTranscript(id: string): Promise<{
@@ -109,9 +223,20 @@ class RecordingService {
 
   // 下载录音文件
   async downloadRecording(id: string): Promise<Blob> {
-    return http.get(`/api/recordings/${id}/download`, {
+    // 直接使用axios而不通过拦截器，因为拦截器会修改blob响应
+    const axios = (await import('axios')).default
+    const response = await axios.get(`${http.defaults.baseURL}/api/recordings/${id}/download`, {
       responseType: 'blob'
     })
+    return response.data
+  }
+
+  // 删除录音（更新）
+  async deleteRecording(id: string): Promise<{
+    success: boolean
+    message: string
+  }> {
+    return http.delete(`/api/recordings/${id}`)
   }
 
   // 搜索录音

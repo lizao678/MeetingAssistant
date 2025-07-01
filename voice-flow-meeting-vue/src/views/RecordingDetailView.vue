@@ -16,7 +16,7 @@
           <h1 class="recording-title">{{ recordingDetail.title }}</h1>
           <div class="meta-info">
             <el-tag type="info" size="small">{{ recordingDetail.language }}</el-tag>
-            <span class="meta-item">{{ recordingDetail.duration }}</span>
+            <span class="meta-item">{{ formatTime(recordingDetail.duration) }}</span>
             <span class="meta-item">{{ recordingDetail.createTime }}</span>
             <span class="meta-item">{{ recordingDetail.speakerCount }}人发言</span>
           </div>
@@ -40,8 +40,19 @@
       </div>
     </div>
 
+    <!-- 加载状态 -->
+    <div v-if="loading" class="loading-container">
+      <el-skeleton animated>
+        <template #template>
+          <el-skeleton-item variant="text" style="width: 40%" />
+          <el-skeleton-item variant="text" style="width: 20%" />
+          <el-skeleton-item variant="rect" style="width: 100%; height: 200px" />
+        </template>
+      </el-skeleton>
+    </div>
+
     <!-- 主内容区 -->
-    <div class="detail-content">
+    <div v-else class="detail-content">
       <el-row :gutter="24">
         <!-- 左侧：智能速览 -->
         <el-col :span="8">
@@ -211,7 +222,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
+import recordingService from '@/services/recordingService'
+import type { RecordingDetail, SpeechSegment, IntelligentSummary, Keyword } from '@/services/recordingService'
 // import AudioPlayer from '../components/AudioPlayer.vue'
 
 const route = useRoute()
@@ -220,70 +233,47 @@ const router = useRouter()
 // 录音详情数据
 const recordingDetail = ref({
   id: '',
-  title: '会议录音 2025-01-30 16:11',
-  duration: '15:32',
-  language: '中文',
-  createTime: '2025-01-30 16:11',
-  speakerCount: 2,
+  title: '',
+  duration: 0,
+  language: '',
+  createTime: '',
+  speakerCount: 0,
   audioUrl: '',
-  status: 'completed'
+  status: 'processing' as 'processing' | 'completed' | 'failed'
 })
 
 // 关键词数据
-const keywords = ref([
-  { word: '互联网舆情', count: 15, score: 0.9 },
-  { word: '市场流动', count: 12, score: 0.8 },
-  { word: '情感', count: 8, score: 0.7 },
-  { word: '分析', count: 6, score: 0.6 },
-  { word: '数据', count: 5, score: 0.5 }
-])
+const keywords = ref<Keyword[]>([])
 
 // 摘要数据
-const summary = ref({
-  content: '抱歉，全文内容太短了，无法给出内容',
-  quality: 3,
-  generateTime: '2025-01-30 16:15'
+const summary = ref<IntelligentSummary>({
+  content: '',
+  quality: 0,
+  wordCount: 0,
+  keyPoints: [],
+  summaryType: 'meeting'
 })
 
-// 章节数据
-const chapters = ref([
-  {
-    title: '开场介绍',
-    summary: '会议开始，参与者介绍',
-    startTime: 0,
-    endTime: 120
-  },
-  {
-    title: '主要议题讨论',
-    summary: '讨论互联网舆情和市场流动相关话题',
-    startTime: 120,
-    endTime: 480
-  }
-])
+// 章节数据（基于AI分析生成）
+const chapters = ref<Array<{
+  title: string
+  summary: string
+  startTime: number
+  endTime: number
+}>>([])
 
-// 转写段落数据
-const segments = ref([
-  {
-    id: 1,
-    speakerName: '发言人A',
-    speakerNumber: 1,
-    speakerColor: '#409eff',
-    startTime: 0,
-    endTime: 21,
-    text: '应该情感，形象，或者说一些文种概念的分析也是一个很还有一个讲这个互联网舆情其实一直也市场流动。',
-    highlightedText: ''
-  },
-  {
-    id: 2,
-    speakerName: '发言人A',
-    speakerNumber: 1,
-    speakerColor: '#409eff',
-    startTime: 21,
-    endTime: 42,
-    text: '这几年来我们这种流量更多的在短视频平台和社群里，在里头的一些热搭，或者说有的可能市场出现了。',
-    highlightedText: ''
-  }
-])
+// 转写段落数据（扩展SpeechSegment类型以适配模板）
+interface ExtendedSegment extends SpeechSegment {
+  highlightedText?: string
+  text: string // 添加text字段以兼容模板
+  speakerNumber: string // 添加speakerNumber字段
+}
+
+const segments = ref<ExtendedSegment[]>([])
+
+// 加载状态
+const loading = ref(true)
+const recordingId = route.params.id as string
 
 // 交互状态
 const searchText = ref('')
@@ -374,14 +364,51 @@ const refreshKeywords = () => {
   // TODO: 调用API重新生成关键词
 }
 
-const refreshSummary = () => {
-  ElMessage.info('正在重新生成摘要...')
-  // TODO: 调用API重新生成摘要
+const refreshSummary = async () => {
+  try {
+    const loading = ElLoading.service({
+      lock: true,
+      text: '正在重新生成智能摘要...',
+      background: 'rgba(0, 0, 0, 0.7)'
+    })
+    
+    const response = await recordingService.regenerateSummary(recordingId, summary.value.summaryType)
+    
+    if (response.success && response.data) {
+      summary.value = response.data
+      ElMessage.success('摘要已重新生成')
+    } else {
+      throw new Error('生成摘要失败')
+    }
+    
+    loading.close()
+  } catch (error: any) {
+    ElMessage.error(`重新生成摘要失败: ${error.message || '未知错误'}`)
+    console.error('重新生成摘要失败:', error)
+  }
 }
 
-const downloadRecording = () => {
-  ElMessage.info('开始下载录音文件...')
-  // TODO: 实现下载功能
+const downloadRecording = async () => {
+  try {
+    ElMessage.info('开始下载录音文件...')
+    
+    const blob = await recordingService.downloadRecording(recordingId)
+    
+    // 创建下载链接
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${recordingDetail.value.title || '录音文件'}.wav`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    window.URL.revokeObjectURL(url)
+    
+    ElMessage.success('下载完成')
+  } catch (error: any) {
+    ElMessage.error(`下载失败: ${error.message || '未知错误'}`)
+    console.error('下载录音失败:', error)
+  }
 }
 
 const shareRecording = () => {
@@ -398,7 +425,7 @@ const handleTimeUpdate = (time: number) => {
     time >= segment.startTime && time <= segment.endTime
   )
   
-  if (currentSegment) {
+  if (currentSegment && currentSegment.id !== undefined) {
     highlightedSegment.value = currentSegment.id
     
     // 自动滚动到当前段落
@@ -421,28 +448,107 @@ const handlePlayStateChange = (isPlaying: boolean) => {
   }
 }
 
-// 生命周期
-onMounted(async () => {
-  // 获取录音ID
-  const recordingId = route.params.id as string
-  
+// 加载录音详情数据
+const loadRecordingDetail = async () => {
   if (!recordingId) {
     ElMessage.error('录音ID不存在')
     router.push('/recordings')
     return
   }
-  
+
   try {
-    // TODO: 调用API获取录音详情
-    console.log('加载录音详情:', recordingId)
+    loading.value = true
+    console.log('正在加载录音详情:', recordingId)
     
-    // 模拟数据加载
-    recordingDetail.value.id = recordingId
+    // 调用API获取录音详情
+    const response = await recordingService.getRecordingDetail(recordingId)
     
-  } catch (error) {
-    ElMessage.error('加载录音详情失败')
-    console.error('加载失败:', error)
+    if (response.success && response.data) {
+      const { recording, segments: rawSegments, summary: rawSummary, keywords: rawKeywords } = response.data
+      
+      // 设置录音基本信息
+      recordingDetail.value = {
+        id: recording.id,
+        title: recording.title || `录音记录 ${recording.createTime}`,
+        duration: recording.duration,
+        language: recording.language,
+        createTime: recording.createTime,
+        speakerCount: recording.speakerCount,
+        audioUrl: `/api/recordings/${recording.id}/download`,
+        status: recording.status
+      }
+      
+      // 转换段落数据格式（后端已返回驼峰格式，直接使用）
+      segments.value = rawSegments.map((segment: any, index) => ({
+        ...segment,
+        text: segment.content, // 添加text字段以兼容模板
+        speakerNumber: (segment.speakerId || '').replace(/[^0-9]/g, '') || String(index + 1), // 提取数字作为发言人编号
+        highlightedText: ''
+      }))
+      
+      // 设置摘要数据（后端已返回驼峰格式，直接使用）
+      if (rawSummary) {
+        summary.value = rawSummary
+      }
+      
+      // 设置关键词数据
+      keywords.value = rawKeywords || []
+      
+      // 生成章节数据（基于发言人变化和时间间隔）
+      generateChapters()
+      
+      console.log('录音详情加载完成:', recording.title)
+    } else {
+      throw new Error('获取录音详情失败')
+    }
+  } catch (error: any) {
+    console.error('加载录音详情失败:', error)
+    
+    if (error.response?.status === 404) {
+      ElMessage.error('录音记录不存在')
+      router.push('/recordings')
+    } else if (error.response?.status === 500) {
+      ElMessage.error('服务器错误，请稍后重试')
+    } else {
+      ElMessage.error(`加载失败: ${error.message || '未知错误'}`)
+    }
+  } finally {
+    loading.value = false
   }
+}
+
+// 生成章节数据
+const generateChapters = () => {
+  if (segments.value.length === 0) return
+  
+  const chapterDuration = 300 // 5分钟一个章节
+  const totalDuration = Math.max(...segments.value.map(s => s.endTime))
+  const chapterCount = Math.ceil(totalDuration / chapterDuration)
+  
+  chapters.value = Array.from({ length: chapterCount }, (_, index) => {
+    const startTime = index * chapterDuration
+    const endTime = Math.min((index + 1) * chapterDuration, totalDuration)
+    
+    // 获取该时间段内的主要发言人和内容
+    const segmentsInChapter = segments.value.filter(s => 
+      s.startTime >= startTime && s.startTime < endTime
+    )
+    
+    const mainSpeaker = segmentsInChapter.length > 0 ? segmentsInChapter[0].speakerName : '发言人'
+    const contentPreview = segmentsInChapter.slice(0, 2).map(s => s.text).join(' ').substring(0, 50)
+    
+    return {
+      title: `第${index + 1}部分 - ${mainSpeaker}`,
+      summary: contentPreview + (contentPreview.length >= 50 ? '...' : ''),
+      startTime,
+      endTime
+    }
+  })
+}
+
+// 生命周期
+onMounted(() => {
+  loadRecordingDetail()
 })
 
 onUnmounted(() => {
@@ -505,6 +611,15 @@ onUnmounted(() => {
 
 .header-actions {
   flex-shrink: 0;
+}
+
+.loading-container {
+  flex: 1;
+  padding: 24px;
+}
+
+.danger-item {
+  color: #f56c6c;
 }
 
 .detail-content {
