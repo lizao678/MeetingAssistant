@@ -41,29 +41,74 @@
       
       <!-- 录音控制按钮 -->
       <div class="record-controls">
-        <el-button
-          :type="isRecording ? 'danger' : 'primary'"
-          :size="'large'"
-          :loading="isConnecting"
-          @click="toggleRecording"
-          class="record-button"
-        >
-          <el-icon v-if="!isConnecting" size="20">
-            <component :is="isRecording ? 'VideoPause' : 'VideoPlay'" />
-          </el-icon>
-          {{ isRecording ? '停止录音' : '开始录音' }}
-        </el-button>
+        <div class="control-buttons">
+          <el-button
+            :type="isRecording ? 'danger' : 'primary'"
+            :size="'large'"
+            :loading="isConnecting"
+            :disabled="isTimeLimit"
+            @click="toggleRecording"
+            class="record-button"
+          >
+            <el-icon v-if="!isConnecting" size="20">
+              <component :is="isRecording ? 'Stop' : 'VideoPlay'" />
+            </el-icon>
+            {{ isRecording ? '停止录音' : '开始录音' }}
+          </el-button>
+          
+          <!-- 暂停/恢复按钮 -->
+          <el-button
+            v-if="isRecording"
+            :type="isPaused ? 'success' : 'warning'"
+            size="large"
+            @click="togglePause"
+            class="pause-button"
+          >
+            <el-icon size="20">
+              <component :is="isPaused ? 'VideoPlay' : 'VideoPause'" />
+            </el-icon>
+            {{ isPaused ? '恢复录音' : '暂停录音' }}
+          </el-button>
+          
+          <el-button
+            v-if="messages.length > 0"
+            @click="clearMessages"
+            type="info"
+            size="large"
+            plain
+          >
+            <el-icon><Delete /></el-icon>
+            清空记录
+          </el-button>
+        </div>
         
-        <el-button
-          v-if="messages.length > 0"
-          @click="clearMessages"
-          type="info"
-          size="large"
-          plain
-        >
-          <el-icon><Delete /></el-icon>
-          清空记录
-        </el-button>
+        <!-- 录音时长显示 -->
+        <div v-if="isRecording || recordingDuration > 0" class="recording-time">
+          <div class="time-display">
+            <el-text 
+              :type="isNearTimeLimit ? 'warning' : isTimeLimit ? 'danger' : 'primary'" 
+              size="large"
+              class="duration-text"
+            >
+              <el-icon><Timer /></el-icon>
+              {{ formattedDuration }} / {{ formattedMaxDuration }}
+            </el-text>
+          </div>
+          
+          <!-- 进度条 -->
+          <el-progress
+            :percentage="recordingProgress"
+            :status="isTimeLimit ? 'exception' : isNearTimeLimit ? 'warning' : 'success'"
+            :show-text="false"
+            :stroke-width="6"
+            class="time-progress"
+          />
+          
+          <!-- 时间限制提示 -->
+          <el-text v-if="isNearTimeLimit" type="warning" size="small">
+            {{ isTimeLimit ? '已达到最大录音时长' : '即将达到最大录音时长' }}
+          </el-text>
+        </div>
       </div>
     </el-card>
 
@@ -120,21 +165,39 @@
         </div>
       </div>
     </el-card>
+
+    <!-- 发言人数选择弹窗 -->
+    <SpeakerCountDialog
+      v-model="showSpeakerDialog"
+      :recording-data="currentRecordingData"
+      @confirm="handleSpeakerDialogConfirm"
+      @cancel="handleSpeakerDialogCancel"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
+import { useRouter } from 'vue-router'
+import SpeakerCountDialog from '../components/SpeakerCountDialog.vue'
 import type { AudioMessage, RecordingStatus, SpeakerInfo } from '../types/audio'
+
+const router = useRouter()
 
 // 响应式数据
 const isRecording = ref(false)
 const isConnecting = ref(false)
-const selectedLang = ref('auto')
+const isPaused = ref(false)
+const selectedLang = ref('zh')
 const speakerVerification = ref(true)
 const messages = ref<AudioMessage[]>([])
 const messagesContainer = ref<HTMLElement>()
+
+// 录音时长相关
+const recordingDuration = ref(0) // 已录制时长(秒)
+const maxRecordingDuration = ref(3600) // 最大录音时长(秒) - 1小时
+let recordingTimer: number | null = null
 
 // WebSocket和录音相关
 let ws: WebSocket | null = null
@@ -147,23 +210,65 @@ const speakerColors = ['#409eff', '#67c23a', '#e6a23c', '#f56c6c', '#909399']
 const speakerMap = new Map<string, SpeakerInfo>()
 let speakerCounter = 0
 
+// 发言人数选择弹窗
+const showSpeakerDialog = ref(false)
+const currentRecordingData = ref({
+  duration: 0,
+  language: 'zh',
+  audioBlob: undefined as Blob | undefined,
+  messages: [] as AudioMessage[]
+})
+
 // 计算属性
 const statusText = computed(() => {
   if (isConnecting.value) return '连接中...'
+  if (isRecording.value && isPaused.value) return '录音暂停'
   if (isRecording.value) return '录音中'
   return '准备就绪'
 })
 
 const statusTagType = computed(() => {
   if (isConnecting.value) return 'warning'
+  if (isRecording.value && isPaused.value) return 'info'
   if (isRecording.value) return 'danger'
   return 'success'
 })
 
 const statusIcon = computed(() => {
   if (isConnecting.value) return 'Loading'
+  if (isRecording.value && isPaused.value) return 'VideoPause'
   if (isRecording.value) return 'VideoCamera'
   return 'SuccessFilled'
+})
+
+// 时间格式化
+const formatTime = (seconds: number) => {
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  const secs = seconds % 60
+  
+  if (hours > 0) {
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+  }
+  return `${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+}
+
+const formattedDuration = computed(() => formatTime(recordingDuration.value))
+const formattedMaxDuration = computed(() => formatTime(maxRecordingDuration.value))
+
+// 录音进度百分比
+const recordingProgress = computed(() => {
+  return Math.min((recordingDuration.value / maxRecordingDuration.value) * 100, 100)
+})
+
+// 是否接近时间限制
+const isNearTimeLimit = computed(() => {
+  return recordingDuration.value >= maxRecordingDuration.value * 0.9 // 90%
+})
+
+// 是否达到时间限制
+const isTimeLimit = computed(() => {
+  return recordingDuration.value >= maxRecordingDuration.value
 })
 
 // 获置信度类型
@@ -350,6 +455,85 @@ const toggleRecording = async () => {
   }
 }
 
+// 切换暂停状态
+const togglePause = () => {
+  if (isPaused.value) {
+    // 恢复录音
+    resumeRecording()
+  } else {
+    // 暂停录音
+    pauseRecording()
+  }
+}
+
+// 暂停录音
+const pauseRecording = () => {
+  if (!isRecording.value) return
+  
+  isPaused.value = true
+  
+  // 停止定时器
+  if (timeInterval) {
+    clearInterval(timeInterval)
+    timeInterval = null
+  }
+  
+  // 停止录音计时器
+  if (recordingTimer) {
+    clearInterval(recordingTimer)
+    recordingTimer = null
+  }
+  
+  ElMessage.info('录音已暂停')
+}
+
+// 恢复录音
+const resumeRecording = () => {
+  if (!isRecording.value || !isPaused.value) return
+  
+  isPaused.value = false
+  
+  // 重新开始音频数据发送
+  timeInterval = setInterval(() => {
+    if (ws && ws.readyState === WebSocket.OPEN && !isPaused.value) {
+      const audioBlob = recorder.getBlob()
+      if (audioBlob.size > 0) {
+        console.log('发送音频数据，大小:', audioBlob.size)
+        ws.send(audioBlob)
+        recorder.clear()
+      }
+    }
+  }, 500)
+  
+  // 重新开始录音计时器
+  startRecordingTimer()
+  
+  ElMessage.success('录音已恢复')
+}
+
+// 开始录音计时器
+const startRecordingTimer = () => {
+  recordingTimer = setInterval(() => {
+    if (!isPaused.value) {
+      recordingDuration.value++
+      
+      // 检查是否达到最大时长
+      if (recordingDuration.value >= maxRecordingDuration.value) {
+        ElMessage.warning('已达到最大录音时长，自动停止录音')
+        stopRecording()
+      }
+    }
+  }, 1000)
+}
+
+// 停止录音计时器
+const stopRecordingTimer = () => {
+  if (recordingTimer) {
+    clearInterval(recordingTimer)
+    recordingTimer = null
+  }
+}
+
 // 开始录音
 const startRecording = async () => {
   try {
@@ -385,7 +569,7 @@ const startRecording = async () => {
       
       // 定时发送音频数据
       timeInterval = setInterval(() => {
-        if (ws && ws.readyState === WebSocket.OPEN) {
+        if (ws && ws.readyState === WebSocket.OPEN && !isPaused.value) {
           const audioBlob = recorder.getBlob()
           if (audioBlob.size > 0) {
             console.log('发送音频数据，大小:', audioBlob.size)
@@ -394,6 +578,9 @@ const startRecording = async () => {
           }
         }
       }, 500)
+      
+      // 开始录音计时器
+      startRecordingTimer()
       
       ElMessage.success('开始录音')
     }
@@ -437,12 +624,15 @@ const startRecording = async () => {
 const stopRecording = async (showMessage = true) => {
   isRecording.value = false
   isConnecting.value = false
+  isPaused.value = false
   
-  // 停止定时器
+  // 停止所有定时器
   if (timeInterval) {
     clearInterval(timeInterval)
     timeInterval = null
   }
+  
+  stopRecordingTimer()
   
   // 停止录音器
   if (recorder) {
@@ -456,8 +646,20 @@ const stopRecording = async (showMessage = true) => {
     ws = null
   }
   
-  if (showMessage) {
-    ElMessage.info('录音已停止')
+  // 如果有录音内容且需要显示消息，则显示发言人选择弹窗
+  if (showMessage && messages.value.length > 0 && recordingDuration.value > 3) {
+    // 准备录音数据
+    currentRecordingData.value = {
+      duration: recordingDuration.value,
+      language: selectedLang.value,
+      audioBlob: undefined, // TODO: 需要获取录音的Blob数据
+      messages: [...messages.value]
+    }
+    
+    // 显示发言人选择弹窗
+    showSpeakerDialog.value = true
+  } else if (showMessage) {
+    ElMessage.info(`录音已停止，总时长: ${formattedDuration.value}`)
   }
 }
 
@@ -473,6 +675,11 @@ const clearMessages = async () => {
     messages.value = []
     speakerMap.clear()
     speakerCounter = 0
+    
+    // 重置录音时长（只有在没有录音时才重置）
+    if (!isRecording.value) {
+      recordingDuration.value = 0
+    }
     
     ElMessage.success('记录已清空')
   } catch {
@@ -494,6 +701,49 @@ const getWebSocketUrl = () => {
   return 'ws://127.0.0.1:26000'
 }
 
+// 处理发言人选择弹窗确认
+const handleSpeakerDialogConfirm = async (data: any) => {
+  try {
+    const loading = ElLoading.service({
+      lock: true,
+      text: '正在保存录音记录...',
+      background: 'rgba(0, 0, 0, 0.7)'
+    })
+    
+    // TODO: 调用后端API提交录音数据
+    // const response = await recordingService.processRecording(data)
+    
+    // 模拟API调用
+    await new Promise(resolve => setTimeout(resolve, 1000))
+    
+    // 生成模拟的录音ID
+    const recordingId = 'rec_' + Date.now()
+    
+    loading.close()
+    ElMessage.success('录音记录已保存，正在跳转到详情页...')
+    
+    // 清空当前录音数据
+    messages.value = []
+    speakerMap.clear()
+    speakerCounter = 0
+    recordingDuration.value = 0
+    
+    // 跳转到录音详情页
+    setTimeout(() => {
+      router.push(`/recording/${recordingId}`)
+    }, 1000)
+    
+  } catch (error) {
+    ElMessage.error('保存录音记录失败，请重试')
+    console.error('保存录音失败:', error)
+  }
+}
+
+// 处理发言人选择弹窗取消
+const handleSpeakerDialogCancel = () => {
+  ElMessage.info('已取消保存录音')
+}
+
 // 生命周期
 onMounted(() => {
   console.log('实时语音识别页面已加载')
@@ -501,6 +751,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   stopRecording(false) // 组件卸载时静默停止录音，不显示提示
+  stopRecordingTimer() // 确保清理所有定时器
 })
 </script>
 
@@ -562,11 +813,52 @@ onUnmounted(() => {
 
 .record-controls {
   display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  margin-top: 4px;
+}
+
+.control-buttons {
+  display: flex;
   justify-content: center;
   align-items: center;
   gap: 20px;
   flex-wrap: wrap;
-  margin-top: 4px;
+}
+
+.recording-time {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 24px;
+  background: var(--el-bg-color-page);
+  border-radius: 12px;
+  border: 1px solid var(--el-border-color-light);
+  min-width: 320px;
+  max-width: 420px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.time-display {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.duration-text {
+  font-weight: 600;
+  font-family: 'SF Mono', 'Monaco', 'Menlo', 'Courier New', monospace;
+  font-size: 16px;
+}
+
+.time-progress {
+  width: 100%;
+}
+
+.pause-button {
+  font-weight: 600;
 }
 
 .record-button {
@@ -716,9 +1008,18 @@ onUnmounted(() => {
     min-height: 300px;
   }
   
-  .record-controls {
+  .control-buttons {
     flex-direction: column;
     gap: 12px;
+  }
+  
+  .recording-time {
+    min-width: 280px;
+    padding: 12px 16px;
+  }
+  
+  .duration-text {
+    font-size: 14px;
   }
   
   .record-button {

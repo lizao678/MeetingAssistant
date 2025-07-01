@@ -297,13 +297,8 @@ async def websocket_transcribe_endpoint(websocket: WebSocket):
                                             is_new_line = True
                                             segment_type = "traditional"
                                         
-                                        # 生成最终数据
-                                        if is_new_line:
-                                            # 换行时包含说话人标识
-                                            final_data = f"[{speaker_id}]: {formatted_text}"
-                                        else:
-                                            # 继续时只有文本
-                                            final_data = formatted_text
+                                        # 生成最终数据（只包含纯文本，发言人信息通过单独字段传递）
+                                        final_data = formatted_text
                                         
                                         # 创建响应
                                         response = TranscriptionResponse(

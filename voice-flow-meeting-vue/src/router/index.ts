@@ -41,6 +41,15 @@ const router = createRouter({
       }
     },
     {
+      path: '/recording/:id',
+      name: 'recording-detail',
+      component: () => import('../views/RecordingDetailView.vue'),
+      meta: {
+        title: '录音详情',
+        icon: 'Document'
+      }
+    },
+    {
       path: '/settings',
       name: 'settings',
       component: () => import('../views/SettingsView.vue'),
