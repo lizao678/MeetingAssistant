@@ -14,6 +14,7 @@ import asyncio
 import httpx
 from loguru import logger
 import json
+from config import text_config
 
 
 class AIService:
@@ -32,10 +33,8 @@ class AIService:
         # 初始化jieba
         jieba.initialize()
         
-        # 停用词集合
-        self.stop_words = {
-            '的', '了', '在', '是', '我', '有', '和', '就', '不', '人', '都', '一', '一个', '上', '也', '很', '到', '说', '要', '去', '你', '会', '着', '没有', '看', '好', '自己', '这', '那', '什么', '这个', '那个', '里', '这里', '那里', '现在', '时候', '可以', '还', '把', '他', '她', '它', '我们', '你们', '他们', '她们', '它们', '这些', '那些', '但是', '然后', '因为', '所以', '如果', '虽然', '只是', '应该', '可能', '已经', '还是', '或者', '而且', '但', '然', '因', '所', '如', '虽', '只', '应', '可', '已', '还', '或', '而'
-        }
+        # 停用词集合（使用统一配置）
+        self.stop_words = text_config.BASE_STOP_WORDS
     
     async def generate_summary(self, text: str, summary_type: str = "meeting") -> Dict[str, Any]:
         """生成智能摘要
@@ -146,14 +145,8 @@ class AIService:
             if not text or len(text.strip()) < 20:
                 return []
             
-            # 扩展停用词列表
-            extended_stop_words = self.stop_words | {
-                '情况', '时候', '方面', '问题', '东西', '地方', '时间', '样子', '事情',
-                '方式', '过程', '结果', '原因', '因为', '所以', '然后', '现在', '这样',
-                '那样', '一个', '这个', '那个', '什么', '怎么', '为什么', '如何',
-                '基本', '主要', '重要', '一般', '特别', '比较', '非常', '一些',
-                '很多', '少数', '全部', '部分', '大部分', '小部分', '左右', '左边', '右边'
-            }
+            # 使用统一的扩展停用词配置
+            extended_stop_words = text_config.get_all_stop_words()
             
             # 使用jieba进行分词和词性标注
             words = pseg.cut(text)
@@ -371,14 +364,8 @@ class AIService:
     def _fallback_keywords(self, text: str, max_keywords: int) -> List[Dict[str, Any]]:
         """降级关键词提取方案"""
         try:
-            # 扩展停用词列表（与主函数保持一致）
-            extended_stop_words = self.stop_words | {
-                '情况', '时候', '方面', '问题', '东西', '地方', '时间', '样子', '事情',
-                '方式', '过程', '结果', '原因', '因为', '所以', '然后', '现在', '这样',
-                '那样', '一个', '这个', '那个', '什么', '怎么', '为什么', '如何',
-                '基本', '主要', '重要', '一般', '特别', '比较', '非常', '一些',
-                '很多', '少数', '全部', '部分', '大部分', '小部分', '左右', '左边', '右边'
-            }
+            # 使用统一的扩展停用词配置
+            extended_stop_words = text_config.get_all_stop_words()
             
             # 使用jieba进行词性标注
             words = pseg.cut(text)

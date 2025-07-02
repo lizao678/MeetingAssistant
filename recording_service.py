@@ -20,6 +20,10 @@ from database import db_manager
 from model_service import asr_async
 from speaker_recognition import diarize_speaker_online_improved_async
 from text_processing import format_str_v3
+from config import (
+    audio_config, quality_config, number_config, 
+    segment_config, ui_config, processing_config, text_config
+)
 
 
 class RecordingProcessor:
@@ -30,11 +34,7 @@ class RecordingProcessor:
         os.makedirs(upload_dir, exist_ok=True)
         
         # 发言人颜色映射
-        self.speaker_colors = [
-            "#1890ff", "#52c41a", "#fa8c16", "#eb2f96", 
-            "#722ed1", "#13c2c2", "#faad14", "#f5222d",
-            "#096dd9", "#389e0d", "#d4b106", "#c41d7f"
-        ]
+        self.speaker_colors = ui_config.SPEAKER_COLORS
         
         # 初始化说话人识别状态
         self._reset_speaker_recognition_state()
@@ -439,38 +439,21 @@ class RecordingProcessor:
         try:
             logger.info(f"开始VAD模拟处理，音频长度: {len(audio_data)/sample_rate:.1f}秒")
             
-            # 使用更小的分段（模拟实时处理）
-            chunk_duration = 3.0  # 3秒为一个基础chunk
-            overlap_duration = 0.5  # 0.5秒重叠，避免切断单词
+            # 1. 生成音频分段
+            chunks = self._simulate_vad_processing(audio_data, sample_rate)
             
-            chunk_samples = int(chunk_duration * sample_rate)
-            overlap_samples = int(overlap_duration * sample_rate)
-            step_samples = chunk_samples - overlap_samples
-            
+            # 2. 处理每个分段
             all_segments = []
-            current_time = 0.0
-            
-            # 分段处理
-            for i in range(0, len(audio_data), step_samples):
-                chunk = audio_data[i:i + chunk_samples]
-                
-                if len(chunk) < sample_rate * 0.5:  # 少于0.5秒的chunk跳过
-                    break
-                    
-                chunk_duration_actual = len(chunk) / sample_rate
-                
-                # 检测音频活动和质量
-                if not self._is_valid_audio_chunk(chunk, sample_rate):
-                    current_time += chunk_duration_actual
+            for chunk_data in chunks:
+                if not self._is_valid_audio_chunk(chunk_data['chunk'], sample_rate):
                     continue
                 
-                # 进一步细分chunk以适合说话人识别
+                # 3. 进一步细分chunk以适合说话人识别
                 sub_segments = await self._process_chunk_with_fine_segmentation(
-                    chunk, sample_rate, language, current_time, speaker_count
+                    chunk_data['chunk'], sample_rate, language, 
+                    chunk_data['start_time'], speaker_count
                 )
-                
                 all_segments.extend(sub_segments)
-                current_time += step_samples / sample_rate  # 使用step而不是整个chunk的时长
             
             logger.info(f"VAD模拟处理完成，生成 {len(all_segments)} 个语音段落")
             return all_segments
@@ -478,6 +461,34 @@ class RecordingProcessor:
         except Exception as e:
             logger.error(f"VAD模拟处理失败: {str(e)}")
             return []
+
+    def _simulate_vad_processing(self, audio_data: np.ndarray, sample_rate: int) -> List[Dict[str, Any]]:
+        """模拟VAD处理，生成音频分段"""
+        chunk_duration = audio_config.CHUNK_DURATION
+        overlap_duration = audio_config.OVERLAP_DURATION
+        
+        chunk_samples = int(chunk_duration * sample_rate)
+        overlap_samples = int(overlap_duration * sample_rate)
+        step_samples = chunk_samples - overlap_samples
+        
+        chunks = []
+        current_time = 0.0
+        
+        for i in range(0, len(audio_data), step_samples):
+            chunk = audio_data[i:i + chunk_samples]
+            
+            if len(chunk) < sample_rate * audio_config.MIN_CHUNK_DURATION:
+                break
+            
+            chunks.append({
+                'chunk': chunk,
+                'start_time': current_time,
+                'duration': len(chunk) / sample_rate
+            })
+            
+            current_time += step_samples / sample_rate
+        
+        return chunks
     
     async def _process_chunk_with_fine_segmentation(
         self,
@@ -489,147 +500,191 @@ class RecordingProcessor:
     ) -> List[Dict[str, Any]]:
         """对chunk进行细分处理，确保适合说话人识别"""
         try:
-            segments = []
-            
-            # 先对整个chunk进行ASR
-            cache_asr = {}
-            asr_result = await asr_async(chunk, language, cache_asr, True)
-            
-            if not asr_result:
-                return segments
-                
-            # 处理ASR结果
-            if isinstance(asr_result, list):
-                if not asr_result or not asr_result[0].get("text"):
-                    return segments
-                asr_data = asr_result[0]
-            else:
-                if not asr_result.get("text"):
-                    return segments
-                asr_data = asr_result
-            
-            # 提取和清理文本
-            text_content = asr_data.get("text", "")
-            import re
-            text_content = re.sub(r'<\|[^|]+\|>', '', text_content).strip()
-            
-            # 高级文本质量检查和清理
-            text_content = self._clean_and_validate_text(text_content)
-            
+            # 1. 转录音频获取文本
+            text_content, asr_confidence = await self._transcribe_chunk(chunk, language)
             if not text_content:
-                return segments
+                return []
             
-            # 检查ASR置信度
-            asr_confidence = asr_data.get("avg_logprob", -1.0)
-            if asr_confidence < -0.5:  # 提高置信度要求
+            # 2. 检查ASR置信度
+            if asr_confidence < quality_config.MIN_ASR_CONFIDENCE:
                 logger.debug(f"ASR置信度太低({asr_confidence:.3f})，跳过: '{text_content}'")
-                return segments
+                return []
             
-            # 检查chunk长度，决定是否需要细分
+            # 3. 根据chunk长度选择处理策略
             chunk_duration_ms = len(chunk) / sample_rate * 1000
             
-            if chunk_duration_ms <= 5000:  # 5秒以内，直接处理
-                speaker_result = await self._identify_speakers(chunk, sample_rate, speaker_count)
-                
-                # 二次验证音频质量（基于说话人识别结果）
-                speaker_confidence = speaker_result.get("confidence", 0.0)
-                if speaker_confidence < 0.4:  # 说话人识别置信度太低
-                    logger.debug(f"说话人识别置信度太低({speaker_confidence:.3f})，跳过: '{text_content}'")
-                    return segments
-                
-                segment_data = {
-                    "content": text_content,
-                    "start_time": base_time,
-                    "end_time": base_time + len(chunk) / sample_rate,
-                    "speaker_id": speaker_result.get("speaker_id", "发言人1"),
-                    "confidence": max(0.1, asr_confidence + 1.0)  # 转换为正数置信度
-                }
-                segments.append(segment_data)
-                
-            else:  # 超过5秒，按照最大4秒切分
-                max_sub_duration = 4.0  # 4秒以内
-                max_sub_samples = int(max_sub_duration * sample_rate)
-                
-                words = text_content.split()
-                if len(words) <= 1:
-                    # 文本太短，不细分
-                    speaker_result = await self._identify_speakers(chunk[:max_sub_samples], sample_rate, speaker_count)
-                    
-                    # 验证质量
-                    speaker_confidence = speaker_result.get("confidence", 0.0)
-                    if speaker_confidence < 0.4:
-                        logger.debug(f"说话人识别置信度太低({speaker_confidence:.3f})，跳过: '{text_content}'")
-                        return segments
-                    
-                    segment_data = {
-                        "content": text_content,
-                        "start_time": base_time,
-                        "end_time": base_time + len(chunk) / sample_rate,
-                        "speaker_id": speaker_result.get("speaker_id", "发言人1"),
-                        "confidence": max(0.1, asr_confidence + 1.0)
-                    }
-                    segments.append(segment_data)
-                else:
-                    # 按音频长度和文本长度合理分割
-                    num_parts = int(np.ceil(chunk_duration_ms / 4000))  # 每部分最多4秒
-                    part_samples = len(chunk) // num_parts
-                    words_per_part = len(words) // num_parts
-                    
-                    for part_idx in range(num_parts):
-                        start_sample = part_idx * part_samples
-                        end_sample = min((part_idx + 1) * part_samples, len(chunk))
-                        part_chunk = chunk[start_sample:end_sample]
-                        
-                        if len(part_chunk) < sample_rate * 0.8:  # 少于0.8秒跳过
-                            continue
-                        
-                        # 分配对应的文本
-                        start_word = part_idx * words_per_part
-                        end_word = min((part_idx + 1) * words_per_part, len(words))
-                        if part_idx == num_parts - 1:  # 最后一部分包含剩余所有单词
-                            end_word = len(words)
-                        
-                        part_text = " ".join(words[start_word:end_word])
-                        
-                        if not part_text.strip():
-                            continue
-                        
-                        # 再次清理和验证分割后的文本
-                        part_text = self._clean_and_validate_text(part_text)
-                        if not part_text:
-                            continue
-                        
-                        # 检查音频质量
-                        if not self._is_valid_audio_chunk(part_chunk, sample_rate):
-                            logger.debug(f"分割音频质量不合格，跳过: '{part_text}'")
-                            continue
-                        
-                        # 说话人识别
-                        speaker_result = await self._identify_speakers(part_chunk, sample_rate, speaker_count)
-                        
-                        # 验证质量
-                        speaker_confidence = speaker_result.get("confidence", 0.0)
-                        if speaker_confidence < 0.4:
-                            logger.debug(f"说话人识别置信度太低({speaker_confidence:.3f})，跳过: '{part_text}'")
-                            continue
-                        
-                        part_start_time = base_time + start_sample / sample_rate
-                        part_end_time = base_time + end_sample / sample_rate
-                        
-                        segment_data = {
-                            "content": part_text,
-                            "start_time": part_start_time,
-                            "end_time": part_end_time,
-                            "speaker_id": speaker_result.get("speaker_id", "发言人1"),
-                            "confidence": max(0.1, asr_confidence + 1.0)
-                        }
-                        segments.append(segment_data)
-            
-            return segments
+            if chunk_duration_ms <= audio_config.MAX_SIMPLE_CHUNK_DURATION * 1000:
+                return await self._process_simple_chunk(
+                    chunk, sample_rate, text_content, base_time, 
+                    speaker_count, asr_confidence
+                )
+            else:  # 超过5秒，进行细分
+                return await self._process_complex_chunk(
+                    chunk, sample_rate, text_content, base_time, 
+                    speaker_count, asr_confidence
+                )
             
         except Exception as e:
             logger.error(f"细分处理失败: {str(e)}")
             return []
+
+    async def _transcribe_chunk(self, chunk: np.ndarray, language: str) -> Tuple[str, float]:
+        """转录音频chunk获取文本"""
+        cache_asr = {}
+        asr_result = await asr_async(chunk, language, cache_asr, True)
+        
+        if not asr_result:
+            return "", -1.0
+            
+        # 处理ASR结果
+        if isinstance(asr_result, list):
+            if not asr_result or not asr_result[0].get("text"):
+                return "", -1.0
+            asr_data = asr_result[0]
+        else:
+            if not asr_result.get("text"):
+                return "", -1.0
+            asr_data = asr_result
+        
+        # 提取和清理文本
+        text_content = asr_data.get("text", "")
+        import re
+        text_content = re.sub(r'<\|[^|]+\|>', '', text_content).strip()
+        
+        # 高级文本质量检查和清理
+        text_content = self._clean_and_validate_text(text_content)
+        asr_confidence = asr_data.get("avg_logprob", -1.0)
+        
+        return text_content, asr_confidence
+
+    async def _process_simple_chunk(
+        self, 
+        chunk: np.ndarray, 
+        sample_rate: int, 
+        text_content: str, 
+        base_time: float,
+        speaker_count: int, 
+        asr_confidence: float
+    ) -> List[Dict[str, Any]]:
+        """处理5秒以内的简单chunk"""
+        speaker_result = await self._identify_speakers(chunk, sample_rate, speaker_count)
+        
+        # 验证说话人识别质量
+        if not self._validate_segment_quality(speaker_result, text_content):
+            return []
+        
+        segment_data = self._create_segment_data(
+            text_content, base_time, base_time + len(chunk) / sample_rate,
+            speaker_result, asr_confidence
+        )
+        return [segment_data]
+
+    async def _process_complex_chunk(
+        self, 
+        chunk: np.ndarray, 
+        sample_rate: int, 
+        text_content: str, 
+        base_time: float,
+        speaker_count: int, 
+        asr_confidence: float
+    ) -> List[Dict[str, Any]]:
+        """处理超过5秒的复杂chunk，进行细分"""
+        max_sub_duration = audio_config.MAX_SUB_DURATION
+        max_sub_samples = int(max_sub_duration * sample_rate)
+        
+        words = text_content.split()
+        if len(words) <= 1:
+            # 文本太短，不细分，但限制音频长度
+            limited_chunk = chunk[:max_sub_samples]
+            return await self._process_simple_chunk(
+                limited_chunk, sample_rate, text_content, base_time,
+                speaker_count, asr_confidence
+            )
+        
+        # 按音频长度和文本长度合理分割
+        chunk_duration_ms = len(chunk) / sample_rate * 1000
+        num_parts = int(np.ceil(chunk_duration_ms / 4000))  # 每部分最多4秒
+        part_samples = len(chunk) // num_parts
+        words_per_part = len(words) // num_parts
+        
+        segments = []
+        for part_idx in range(num_parts):
+            segment = await self._process_chunk_part(
+                chunk, sample_rate, words, base_time, speaker_count,
+                asr_confidence, part_idx, num_parts, part_samples, words_per_part
+            )
+            if segment:
+                segments.append(segment)
+        
+        return segments
+
+    async def _process_chunk_part(
+        self, chunk: np.ndarray, sample_rate: int, words: list, base_time: float,
+        speaker_count: int, asr_confidence: float, part_idx: int, num_parts: int,
+        part_samples: int, words_per_part: int
+    ) -> Optional[Dict[str, Any]]:
+        """处理chunk的一个部分"""
+        start_sample = part_idx * part_samples
+        end_sample = min((part_idx + 1) * part_samples, len(chunk))
+        part_chunk = chunk[start_sample:end_sample]
+        
+        if len(part_chunk) < sample_rate * audio_config.MIN_PART_DURATION:
+            return None
+        
+        # 分配对应的文本
+        start_word = part_idx * words_per_part
+        end_word = min((part_idx + 1) * words_per_part, len(words))
+        if part_idx == num_parts - 1:  # 最后一部分包含剩余所有单词
+            end_word = len(words)
+        
+        part_text = " ".join(words[start_word:end_word])
+        if not part_text.strip():
+            return None
+        
+        # 再次清理和验证分割后的文本
+        part_text = self._clean_and_validate_text(part_text)
+        if not part_text:
+            return None
+        
+        # 检查音频质量
+        if not self._is_valid_audio_chunk(part_chunk, sample_rate):
+            logger.debug(f"分割音频质量不合格，跳过: '{part_text}'")
+            return None
+        
+        # 说话人识别
+        speaker_result = await self._identify_speakers(part_chunk, sample_rate, speaker_count)
+        
+        # 验证质量
+        if not self._validate_segment_quality(speaker_result, part_text):
+            return None
+        
+        part_start_time = base_time + start_sample / sample_rate
+        part_end_time = base_time + end_sample / sample_rate
+        
+        return self._create_segment_data(
+            part_text, part_start_time, part_end_time, speaker_result, asr_confidence
+        )
+
+    def _validate_segment_quality(self, speaker_result: Dict[str, Any], text_content: str) -> bool:
+        """验证segment质量"""
+        speaker_confidence = speaker_result.get("confidence", 0.0)
+        if speaker_confidence < quality_config.MIN_SPEAKER_CONFIDENCE:
+            logger.debug(f"说话人识别置信度太低({speaker_confidence:.3f})，跳过: '{text_content}'")
+            return False
+        return True
+
+    def _create_segment_data(
+        self, text_content: str, start_time: float, end_time: float,
+        speaker_result: Dict[str, Any], asr_confidence: float
+    ) -> Dict[str, Any]:
+        """创建segment数据结构"""
+        return {
+            "content": text_content,
+            "start_time": start_time,
+            "end_time": end_time,
+            "speaker_id": speaker_result.get("speaker_id", "发言人1"),
+            "confidence": max(0.1, asr_confidence + 1.0)  # 转换为正数置信度
+        }
     
     def _clean_and_validate_text(self, text: str) -> str:
         """高级文本清理和验证"""
@@ -639,8 +694,8 @@ class RecordingProcessor:
         # 基础清理
         text = text.strip()
         
-        # 过滤太短的文本（少于2个字符）
-        if len(text) < 2:
+        # 过滤太短的文本
+        if len(text) < quality_config.MIN_TEXT_LENGTH:
             logger.debug(f"文本太短，过滤: '{text}'")
             return ""
         
@@ -652,27 +707,16 @@ class RecordingProcessor:
             logger.debug(f"文本只包含标点符号，过滤: '{text}'")
             return ""
         
-        # 过滤明显的误识别模式
-        invalid_patterns = [
-            r'^[。，！？；：]{1,3}$',  # 只有1-3个标点符号
-            r'^[a-zA-Z]{1,2}$',       # 只有1-2个字母
-            r'^[0-9]{1,2}$',          # 只有1-2个数字
-            r'^[　\s]+$',             # 只有空格
-            r'^呃+$',                 # 只有语气词
-            r'^嗯+$',                 # 只有语气词
-            r'^啊+$',                 # 只有语气词
-            r'^哦+$',                 # 只有语气词
-        ]
-        
+        # 使用统一的无效文本模式配置
         import re
-        for pattern in invalid_patterns:
+        for pattern in text_config.INVALID_TEXT_PATTERNS:
             if re.match(pattern, text):
                 logger.debug(f"匹配无效模式 '{pattern}'，过滤: '{text}'")
                 return ""
         
         # 检查是否包含足够的有意义内容
         meaningful_chars = sum(1 for c in text if c.isalnum() or ord(c) > 127)  # 字母数字或中文字符
-        if meaningful_chars < 2:
+        if meaningful_chars < quality_config.MIN_MEANINGFUL_CHARS:
             logger.debug(f"有意义字符太少({meaningful_chars})，过滤: '{text}'")
             return ""
         
@@ -698,21 +742,21 @@ class RecordingProcessor:
         if len(chunk) == 0:
             return False
         
-        # 1. 检查音频时长（至少0.5秒）
+        # 1. 检查音频时长
         duration = len(chunk) / sample_rate
-        if duration < 0.5:
+        if duration < audio_config.MIN_CHUNK_DURATION:
             logger.debug(f"音频时长太短({duration:.2f}s)，跳过")
             return False
         
         # 2. 检查音频能量（避免静音）
         audio_energy = np.mean(np.abs(chunk))
-        if audio_energy < 0.003:  # 提高能量阈值
+        if audio_energy < audio_config.MIN_ENERGY_THRESHOLD:
             logger.debug(f"音频能量太低({audio_energy:.6f})，跳过")
             return False
         
         # 3. 检查音频动态范围
         audio_std = np.std(chunk)
-        if audio_std < 0.001:  # 避免单调音频
+        if audio_std < audio_config.MIN_ENERGY_THRESHOLD:  # 避免单调音频
             logger.debug(f"音频动态范围太小({audio_std:.6f})，跳过")
             return False
         
@@ -725,8 +769,8 @@ class RecordingProcessor:
         # 5. 检查零交叉率（避免纯噪音）
         zero_crossings = np.sum(np.diff(np.signbit(chunk)))
         zcr = zero_crossings / len(chunk)
-        if zcr > 0.3:  # 零交叉率过高可能是噪音
-            logger.debug(f"零交叉率过高({zcr:.3f})，可能是噪音，跳过")
+        if zcr > audio_config.ZERO_CROSSING_THRESHOLD:  # 零交叉率过高可能是噪音
+            logger.debug(f"零交叉率过高({zcr:.3f})，阈值({audio_config.ZERO_CROSSING_THRESHOLD})，可能是噪音，跳过")
             return False
         
         # 6. 检查频谱质量（简单检查）
@@ -757,7 +801,7 @@ class RecordingProcessor:
 
         merged = []
         current_segment = None
-        PAUSE_THRESHOLD = 1.5  # 1.5秒停顿阈值，与实时处理保持一致
+        PAUSE_THRESHOLD = segment_config.SILENCE_THRESHOLD_MS / 1000  # 转换为秒
 
         for segment in segments:
             if current_segment is None:
