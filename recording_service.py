@@ -147,6 +147,12 @@ class RecordingProcessor:
             # 3. 保存转录结果
             db_manager.save_segments(recording_id, processed_segments)
             
+            # 如果是自动识别模式，更新实际的发言人数量
+            if speaker_count == 0 and processed_segments:
+                actual_speaker_count = len(set(seg["speaker_id"] for seg in processed_segments))
+                db_manager.update_recording_speaker_count(recording_id, actual_speaker_count)
+                logger.info(f"自动识别完成，实际发言人数量: {actual_speaker_count}")
+            
             # 4. 生成智能摘要
             full_text = " ".join([seg["content"] for seg in processed_segments])
             summary_type = options.get("summary_type", "meeting")
@@ -413,8 +419,19 @@ class RecordingProcessor:
             # 使用现有的说话人识别系统
             # 这里简化处理，实际应该调用speaker_recognition模块
             
-            # 模拟说话人识别结果
-            speaker_id = f"发言人{chr(65 + (len(audio_chunk) % speaker_count))}"  # A, B, C...
+            # 处理自动识别情况
+            if speaker_count == 0:
+                # 自动识别模式：基于音频特征简单判断（实际应该用更复杂的算法）
+                # 这里简化为根据音频长度和频率特征来模拟识别
+                audio_energy = np.mean(np.abs(audio_chunk))
+                if audio_energy > 0.1:
+                    speaker_index = int(audio_energy * 10) % 3  # 最多3个发言人
+                else:
+                    speaker_index = 0
+                speaker_id = f"发言人{chr(65 + speaker_index)}"  # A, B, C
+            else:
+                # 指定发言人数量模式
+                speaker_id = f"发言人{chr(65 + (len(audio_chunk) % speaker_count))}"  # A, B, C...
             
             return {
                 "speaker_id": speaker_id,

@@ -21,14 +21,6 @@
 
       <!-- 中间进度区域 -->
       <div class="progress-section">
-        <!-- 波形显示区域 -->
-        <div ref="waveformContainer" class="waveform-container">
-          <div v-if="!audioUrl" class="waveform-placeholder">
-            <el-icon size="24" color="#c0c4cc"><Headphone /></el-icon>
-            <span>暂无音频文件</span>
-          </div>
-        </div>
-        
         <!-- 进度条 -->
         <div class="progress-bar">
           <el-slider
@@ -39,6 +31,25 @@
             @input="handleProgressInput"
             class="audio-slider"
           />
+        </div>
+        
+        <!-- 段落时间轴（紧凑版） -->
+        <div v-if="segments.length > 0" class="segments-timeline-compact">
+          <div class="timeline-container-compact">
+            <div
+              v-for="segment in segments"
+              :key="segment.id"
+              class="segment-marker-compact"
+              :style="{
+                left: getSegmentPosition(segment.startTime) + '%',
+                width: getSegmentWidth(segment.startTime, segment.endTime) + '%',
+                backgroundColor: segment.speakerColor
+              }"
+              :class="{ 'active': currentSegment?.id === segment.id }"
+              @click="jumpToTime(segment.startTime)"
+              :title="`${segment.speakerName} (${formatTime(segment.startTime)}): ${segment.text.substring(0, 50)}...`"
+            />
+          </div>
         </div>
       </div>
 
@@ -104,30 +115,7 @@
       </div>
     </div>
 
-    <!-- 段落快速跳转 -->
-    <div v-if="segments.length > 0" class="segments-timeline">
-      <div class="timeline-container">
-        <div
-          v-for="segment in segments"
-          :key="segment.id"
-          class="segment-marker"
-          :style="{
-            left: getSegmentPosition(segment.startTime) + '%',
-            width: getSegmentWidth(segment.startTime, segment.endTime) + '%'
-          }"
-          :class="{
-            'active': currentSegment?.id === segment.id,
-            'hover': hoveredSegment?.id === segment.id
-          }"
-          @click="jumpToTime(segment.startTime)"
-          @mouseenter="hoveredSegment = segment"
-          @mouseleave="hoveredSegment = null"
-          :title="`${segment.speakerName}: ${segment.text.substring(0, 50)}...`"
-        >
-          <div class="segment-color" :style="{ backgroundColor: segment.speakerColor }"></div>
-        </div>
-      </div>
-    </div>
+
 
     <!-- 隐藏的音频元素 -->
     <audio
@@ -145,6 +133,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
+import { ArrowDown } from '@element-plus/icons-vue'
 
 interface Segment {
   id: number
@@ -454,27 +443,8 @@ onUnmounted(() => {
   min-width: 200px;
 }
 
-.waveform-container {
-  height: 60px;
-  margin-bottom: 8px;
-  background: #f8f9fa;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid #e4e7ed;
-}
-
-.waveform-placeholder {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #c0c4cc;
-  font-size: 14px;
-}
-
 .progress-bar {
-  margin-top: 8px;
+  margin-bottom: 8px;
 }
 
 .audio-slider {
@@ -515,51 +485,42 @@ onUnmounted(() => {
   min-width: 120px;
 }
 
-.segments-timeline {
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid #f0f0f0;
+/* 紧凑版段落时间轴 */
+.segments-timeline-compact {
+  margin-top: 4px;
 }
 
-.timeline-container {
+.timeline-container-compact {
   position: relative;
-  height: 24px;
-  background: #f8f9fa;
+  height: 8px;
+  background: #f5f7fa;
   border-radius: 4px;
   overflow: hidden;
 }
 
-.segment-marker {
+.segment-marker-compact {
   position: absolute;
   height: 100%;
   cursor: pointer;
   border-radius: 2px;
   transition: all 0.2s;
-  border: 1px solid transparent;
+  opacity: 0.8;
+  border: 1px solid rgba(255, 255, 255, 0.3);
 }
 
-.segment-marker:hover {
-  border-color: #409eff;
-  z-index: 2;
-  transform: scaleY(1.2);
-}
-
-.segment-marker.active {
-  border-color: #409eff;
-  box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.2);
-  z-index: 3;
-}
-
-.segment-color {
-  width: 100%;
-  height: 100%;
-  opacity: 0.7;
-  border-radius: inherit;
-}
-
-.segment-marker:hover .segment-color,
-.segment-marker.active .segment-color {
+.segment-marker-compact:hover {
   opacity: 1;
+  transform: scaleY(1.5);
+  z-index: 2;
+  border-color: rgba(255, 255, 255, 0.6);
+}
+
+.segment-marker-compact.active {
+  opacity: 1;
+  transform: scaleY(1.8);
+  z-index: 3;
+  border-color: #fff;
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.2);
 }
 
 :deep(.el-dropdown-menu__item.is-active) {

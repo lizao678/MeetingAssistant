@@ -33,6 +33,14 @@
           >
             {{ hasOfflineProcessed ? '重新离线处理' : '离线高精度处理' }}
           </el-button>
+          <el-button 
+            v-if="aiProcessing" 
+            type="warning" 
+            :icon="'CircleClose'"
+            @click="manualStopPolling"
+          >
+            停止AI处理
+          </el-button>
           <el-button :icon="'Download'" @click="downloadRecording">下载录音</el-button>
           <el-button :icon="'Share'" @click="shareRecording">分享</el-button>
           <el-dropdown trigger="click">
@@ -77,10 +85,26 @@
                 </div>
               </template>
               <div class="keywords-section">
-                <div v-if="keywords.length === 0" class="empty-placeholder">
-                  <el-icon size="48" color="#c0c4cc"><DocumentCopy /></el-icon>
-                  <p>正在提取关键词...</p>
+                <!-- AI处理中的loading状态 -->
+                <div v-if="keywordsLoading" class="loading-placeholder">
+                  <el-skeleton animated>
+                    <template #template>
+                      <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                        <el-skeleton-item v-for="i in 6" :key="i" variant="button" style="width: 60px; height: 24px; border-radius: 12px;" />
+                      </div>
+                    </template>
+                  </el-skeleton>
+                  <p style="text-align: center; margin-top: 12px; color: #409eff; font-size: 14px;">
+                    <el-icon class="is-loading"><Loading /></el-icon>
+                    AI正在提取关键词...
+                  </p>
                 </div>
+                <!-- 空状态 -->
+                <div v-else-if="keywords.length === 0" class="empty-placeholder">
+                  <el-icon size="48" color="#c0c4cc"><DocumentCopy /></el-icon>
+                  <p>暂无关键词数据</p>
+                </div>
+                <!-- 关键词云 -->
                 <div v-else class="keywords-cloud">
                   <el-tag
                     v-for="keyword in keywords"
@@ -108,10 +132,27 @@
                 </div>
               </template>
               <div class="summary-content">
-                <div v-if="!summary.content" class="empty-placeholder">
-                  <el-icon size="48" color="#c0c4cc"><Reading /></el-icon>
-                  <p>正在生成摘要...</p>
+                <!-- AI处理中的loading状态 -->
+                <div v-if="summaryLoading" class="loading-placeholder">
+                  <el-skeleton animated>
+                    <template #template>
+                      <el-skeleton-item variant="text" style="width: 100%" />
+                      <el-skeleton-item variant="text" style="width: 80%" />
+                      <el-skeleton-item variant="text" style="width: 90%" />
+                      <el-skeleton-item variant="text" style="width: 60%" />
+                    </template>
+                  </el-skeleton>
+                  <p style="text-align: center; margin-top: 12px; color: #409eff; font-size: 14px;">
+                    <el-icon class="is-loading"><Loading /></el-icon>
+                    AI正在生成智能摘要...
+                  </p>
                 </div>
+                <!-- 空状态 -->
+                <div v-else-if="!summary.content" class="empty-placeholder">
+                  <el-icon size="48" color="#c0c4cc"><Reading /></el-icon>
+                  <p>暂无摘要数据</p>
+                </div>
+                <!-- 摘要内容 -->
                 <div v-else>
                   <div class="summary-text">
                     {{ summary.content }}
@@ -132,11 +173,28 @@
             </el-card>
 
             <!-- 章节速览 -->
-            <el-card v-if="chapters.length > 0" class="summary-card" shadow="never">
+            <el-card v-if="chaptersLoading || chapters.length > 0" class="summary-card" shadow="never">
               <template #header>
                 <h3>章节速览</h3>
               </template>
-              <div class="chapters-list">
+              <!-- AI处理中的loading状态 -->
+              <div v-if="chaptersLoading" class="loading-placeholder">
+                <el-skeleton animated>
+                  <template #template>
+                    <div v-for="i in 3" :key="i" style="margin-bottom: 16px;">
+                      <el-skeleton-item variant="text" style="width: 30%; height: 14px;" />
+                      <el-skeleton-item variant="text" style="width: 60%; height: 16px; margin-top: 4px;" />
+                      <el-skeleton-item variant="text" style="width: 80%; height: 12px; margin-top: 4px;" />
+                    </div>
+                  </template>
+                </el-skeleton>
+                <p style="text-align: center; margin-top: 12px; color: #409eff; font-size: 14px;">
+                  <el-icon class="is-loading"><Loading /></el-icon>
+                  正在生成章节速览...
+                </p>
+              </div>
+              <!-- 章节列表 -->
+              <div v-else class="chapters-list">
                 <div
                   v-for="(chapter, index) in chapters"
                   :key="index"
@@ -174,7 +232,35 @@
               </div>
             </template>
             
-            <div ref="transcriptContainer" class="transcript-content">
+            <!-- 转写原文loading状态 -->
+            <div v-if="transcriptLoading" class="loading-placeholder">
+              <el-skeleton animated>
+                <template #template>
+                  <div v-for="i in 4" :key="i" style="margin-bottom: 20px;">
+                    <div style="display: flex; align-items: center; margin-bottom: 8px;">
+                      <el-skeleton-item variant="circle" style="width: 32px; height: 32px; margin-right: 12px;" />
+                      <el-skeleton-item variant="text" style="width: 80px; height: 16px;" />
+                      <el-skeleton-item variant="text" style="width: 120px; height: 14px; margin-left: auto;" />
+                    </div>
+                    <el-skeleton-item variant="text" style="width: 100%; height: 16px;" />
+                    <el-skeleton-item variant="text" style="width: 80%; height: 16px; margin-top: 4px;" />
+                  </div>
+                </template>
+              </el-skeleton>
+              <p style="text-align: center; margin-top: 12px; color: #409eff; font-size: 14px;">
+                <el-icon class="is-loading"><Loading /></el-icon>
+                正在加载转写内容...
+              </p>
+            </div>
+            
+            <!-- 空状态 -->
+            <div v-else-if="segments.length === 0" class="empty-placeholder">
+              <el-icon size="48" color="#c0c4cc"><ChatDotRound /></el-icon>
+              <p>暂无转写内容</p>
+            </div>
+            
+            <!-- 转写内容 -->
+            <div v-else ref="transcriptContainer" class="transcript-content">
               <div
                 v-for="(segment, index) in filteredSegments"
                 :key="segment.id"
@@ -217,6 +303,30 @@
       </el-row>
     </div>
 
+    <!-- AI处理状态指示器 -->
+    <div v-if="aiProcessing" class="processing-indicator">
+      <div class="processing-content">
+        <el-icon class="is-loading"><Loading /></el-icon>
+        <span class="processing-text">
+          AI正在处理中... (第{{ pollingAttempts }}次检查, 已运行{{ Math.round((Date.now() - pollingStartTime) / 1000) }}秒)
+        </span>
+        <el-button 
+          type="text" 
+          size="small" 
+          :icon="'CircleClose'"
+          @click="manualStopPolling"
+        >
+          停止
+        </el-button>
+      </div>
+      <el-progress 
+        :percentage="Math.min((pollingAttempts / maxPollingAttempts) * 100, 100)" 
+        :show-text="false"
+        :stroke-width="2"
+        color="#409eff"
+      />
+    </div>
+
     <!-- 底部音频播放器 -->
     <div v-if="recordingDetail.audioUrl" class="audio-player-section">
       <AudioPlayer
@@ -241,7 +351,7 @@
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
-import { Loading } from '@element-plus/icons-vue'
+import { Loading, DocumentCopy, Reading, ChatDotRound, CircleClose } from '@element-plus/icons-vue'
 import recordingService from '@/services/recordingService'
 import http from '@/services/http'
 import type { RecordingDetail, SpeechSegment, IntelligentSummary, Keyword } from '@/services/recordingService'
@@ -306,6 +416,22 @@ const transcriptContainer = ref<HTMLElement>()
 const offlineProcessing = ref(false)
 const canOfflineReprocess = ref(false)
 const hasOfflineProcessed = ref(false)
+
+// AI处理状态
+const aiProcessing = ref(false)
+const summaryLoading = ref(false)
+const keywordsLoading = ref(false)
+const chaptersLoading = ref(false)
+const transcriptLoading = ref(false)
+const processingTimer = ref<number | null>(null)
+
+// 轮询控制参数
+const pollingAttempts = ref(0)
+const maxPollingAttempts = ref(40) // 最大轮询次数 (40次 * 3秒 = 2分钟)
+const consecutiveFailures = ref(0)
+const maxConsecutiveFailures = ref(5) // 最大连续失败次数
+const pollingStartTime = ref(0)
+const maxPollingDuration = ref(5 * 60 * 1000) // 最大轮询时长：5分钟
 
 // 过滤后的段落
 const filteredSegments = computed(() => {
@@ -577,23 +703,38 @@ const loadRecordingDetail = async () => {
       console.log('音频URL:', recordingDetail.value.audioUrl)
       
       // 转换段落数据格式（后端已返回驼峰格式，直接使用）
-      segments.value = rawSegments.map((segment: any, index) => ({
-        ...segment,
-        text: segment.content, // 添加text字段以兼容模板
-        speakerNumber: (segment.speakerId || '').replace(/[^0-9]/g, '') || String(index + 1), // 提取数字作为发言人编号
-        highlightedText: ''
-      }))
+      if (rawSegments && rawSegments.length > 0) {
+        segments.value = rawSegments.map((segment: any, index) => ({
+          ...segment,
+          text: segment.content, // 添加text字段以兼容模板
+          speakerNumber: (segment.speakerId || '').replace(/[^0-9]/g, '') || String(index + 1), // 提取数字作为发言人编号
+          highlightedText: ''
+        }))
+        transcriptLoading.value = false
+      } else {
+        transcriptLoading.value = true
+      }
+      
+      // 检查AI处理状态
+      checkAIProcessingStatus(recording.status, rawSummary, rawKeywords)
       
       // 设置摘要数据（后端已返回驼峰格式，直接使用）
       if (rawSummary) {
         summary.value = rawSummary
+        summaryLoading.value = false
       }
       
       // 设置关键词数据
-      keywords.value = rawKeywords || []
+      if (rawKeywords && rawKeywords.length > 0) {
+        keywords.value = rawKeywords
+        keywordsLoading.value = false
+      }
       
       // 生成章节数据（基于发言人变化和时间间隔）
-      generateChapters()
+      if (segments.value.length > 0) {
+        generateChapters()
+        chaptersLoading.value = false
+      }
       
       console.log('录音详情加载完成:', recording.title)
     } else {
@@ -709,7 +850,161 @@ const loadDemoData = () => {
   ]
   
   generateChapters()
+  transcriptLoading.value = false
   ElMessage.success('演示数据加载完成')
+}
+
+// 检查AI处理状态
+const checkAIProcessingStatus = (status: string, summaryData: any, keywordsData: any) => {
+  // 如果录音状态是处理中，或者缺少AI生成的内容
+  const needsProcessing = status === 'processing' || !summaryData || !keywordsData || keywordsData.length === 0
+  
+  if (needsProcessing) {
+    aiProcessing.value = true
+    summaryLoading.value = !summaryData
+    keywordsLoading.value = !keywordsData || keywordsData.length === 0
+    chaptersLoading.value = segments.value.length === 0
+    transcriptLoading.value = segments.value.length === 0
+    
+    // 重置轮询计数器
+    pollingAttempts.value = 0
+    consecutiveFailures.value = 0
+    pollingStartTime.value = Date.now()
+    
+    // 开始轮询检查处理状态
+    startProcessingPolling()
+    console.log('AI正在处理中，启动状态轮询')
+  } else {
+    aiProcessing.value = false
+    summaryLoading.value = false
+    keywordsLoading.value = false
+    chaptersLoading.value = false
+    transcriptLoading.value = false
+    stopProcessingPolling()
+    console.log('AI处理已完成')
+  }
+}
+
+// 开始轮询检查处理状态
+const startProcessingPolling = () => {
+  // 清除之前的定时器
+  stopProcessingPolling()
+  
+  // 每3秒检查一次状态
+  processingTimer.value = window.setInterval(async () => {
+    try {
+      pollingAttempts.value++
+      
+      // 检查是否超过最大轮询次数
+      if (pollingAttempts.value > maxPollingAttempts.value) {
+        console.warn('达到最大轮询次数，停止轮询')
+        stopProcessingPolling()
+        ElMessage.warning('AI处理时间较长，请稍后手动刷新页面查看结果')
+        return
+      }
+      
+      // 检查是否超过最大轮询时长
+      const elapsedTime = Date.now() - pollingStartTime.value
+      if (elapsedTime > maxPollingDuration.value) {
+        console.warn('达到最大轮询时长，停止轮询')
+        stopProcessingPolling()
+        ElMessage.warning('AI处理超时，请稍后手动刷新页面查看结果')
+        return
+      }
+      
+      // 检查是否连续失败次数过多
+      if (consecutiveFailures.value >= maxConsecutiveFailures.value) {
+        console.warn('连续失败次数过多，停止轮询')
+        stopProcessingPolling()
+        ElMessage.error('网络连接异常，请检查网络后手动刷新页面')
+        return
+      }
+      
+      console.log(`检查AI处理状态... (第${pollingAttempts.value}次，已运行${Math.round(elapsedTime/1000)}秒)`)
+      const response = await recordingService.getRecordingDetail(recordingId)
+      
+      if (response.success && response.data) {
+        // 重置连续失败计数
+        consecutiveFailures.value = 0
+        
+        const { recording, segments: rawSegments, summary: rawSummary, keywords: rawKeywords } = response.data
+        
+        // 检查转写内容是否已生成
+        if (transcriptLoading.value && rawSegments && rawSegments.length > 0) {
+          segments.value = rawSegments.map((segment: any, index) => ({
+            ...segment,
+            text: segment.content,
+            speakerNumber: (segment.speakerId || '').replace(/[^0-9]/g, '') || String(index + 1),
+            highlightedText: ''
+          }))
+          transcriptLoading.value = false
+          ElMessage.success('转写内容加载完成')
+        }
+        
+        // 检查摘要是否已生成
+        if (summaryLoading.value && rawSummary) {
+          summary.value = rawSummary
+          summaryLoading.value = false
+          ElMessage.success('智能摘要生成完成')
+        }
+        
+        // 检查关键词是否已生成
+        if (keywordsLoading.value && rawKeywords && rawKeywords.length > 0) {
+          keywords.value = rawKeywords
+          keywordsLoading.value = false
+          ElMessage.success('关键词提取完成')
+        }
+        
+        // 检查章节是否需要重新生成
+        if (chaptersLoading.value && segments.value.length > 0) {
+          generateChapters()
+          chaptersLoading.value = false
+        }
+        
+        // 如果所有AI处理都完成了，停止轮询
+        if (!transcriptLoading.value && !summaryLoading.value && !keywordsLoading.value && !chaptersLoading.value) {
+          aiProcessing.value = false
+          stopProcessingPolling()
+          ElMessage.success('AI分析完成')
+          console.log('AI处理全部完成，停止轮询')
+        }
+      } else {
+        // API返回失败，但不立即停止轮询
+        consecutiveFailures.value++
+        console.warn(`API请求失败 (连续失败${consecutiveFailures.value}次):`, response)
+      }
+    } catch (error) {
+      consecutiveFailures.value++
+      console.error(`检查处理状态失败 (连续失败${consecutiveFailures.value}次):`, error)
+      
+      // 如果连续失败次数还没达到上限，继续重试
+      if (consecutiveFailures.value < maxConsecutiveFailures.value) {
+        console.log('继续重试轮询...')
+      }
+    }
+  }, 3000) // 每3秒检查一次
+  
+  console.log('开始AI处理状态轮询，最大轮询次数:', maxPollingAttempts.value, '最大时长:', maxPollingDuration.value / 1000, '秒')
+}
+
+// 停止轮询
+const stopProcessingPolling = () => {
+  if (processingTimer.value) {
+    clearInterval(processingTimer.value)
+    processingTimer.value = null
+    console.log('已停止AI处理状态轮询')
+  }
+}
+
+// 手动停止轮询（用户操作）
+const manualStopPolling = () => {
+  stopProcessingPolling()
+  aiProcessing.value = false
+  summaryLoading.value = false
+  keywordsLoading.value = false
+  chaptersLoading.value = false
+  transcriptLoading.value = false
+  ElMessage.info('已停止AI处理状态检查')
 }
 
 // 生成章节数据
@@ -748,7 +1043,9 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  // 清理资源
+  // 清理AI处理状态轮询定时器
+  stopProcessingPolling()
+  console.log('页面卸载，清理资源')
 })
 </script>
 
@@ -859,6 +1156,31 @@ onUnmounted(() => {
 .empty-placeholder p {
   margin: 12px 0 0 0;
   font-size: 14px;
+}
+
+.loading-placeholder {
+  padding: 20px;
+}
+
+.loading-placeholder p {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.is-loading {
+  animation: rotating 2s linear infinite;
+}
+
+@keyframes rotating {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
 }
 
 .keywords-cloud {
@@ -1072,5 +1394,30 @@ onUnmounted(() => {
 
 :deep(.el-card__body) {
   padding: 20px;
+}
+
+.processing-indicator {
+  position: sticky;
+  bottom: 0;
+  background: #f0f9ff;
+  border-top: 1px solid #d1e7dd;
+  padding: 12px 24px;
+  z-index: 1000;
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.processing-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.processing-text {
+  color: #409eff;
+  font-size: 14px;
+  font-weight: 500;
+  margin-left: 8px;
+  flex: 1;
 }
 </style>

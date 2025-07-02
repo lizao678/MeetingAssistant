@@ -171,9 +171,9 @@ async def process_recording(
             logger.error(f"文件类型验证失败: {audio_file.content_type}")
             raise HTTPException(status_code=400, detail="请上传音频或视频文件")
         
-        # 验证发言人数量
-        if speaker_count < 1 or speaker_count > 10:
-            raise HTTPException(status_code=400, detail="发言人数量必须在1-10之间")
+        # 验证发言人数量（0表示自动识别）
+        if speaker_count < 0 or speaker_count > 10:
+            raise HTTPException(status_code=400, detail="发言人数量必须在0-10之间（0表示自动识别）")
         
         # 构建处理选项
         options = {

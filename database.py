@@ -147,6 +147,23 @@ class DatabaseManager:
             logger.error(f"更新录音状态失败: {str(e)}")
             return False
     
+    def update_recording_speaker_count(self, recording_id: str, speaker_count: int) -> bool:
+        """更新录音的发言人数量"""
+        try:
+            with self.get_session() as session:
+                recording = session.query(Recording).filter(Recording.id == recording_id).first()
+                if recording:
+                    recording.speaker_count = speaker_count
+                    recording.update_time = datetime.utcnow()
+                    session.commit()
+                    logger.info(f"更新录音 {recording_id} 的发言人数量为: {speaker_count}")
+                    return True
+                return False
+                
+        except Exception as e:
+            logger.error(f"更新发言人数量失败: {str(e)}")
+            return False
+    
     def get_recording(self, recording_id: str) -> Optional[Dict[str, Any]]:
         """获取录音记录"""
         try:
