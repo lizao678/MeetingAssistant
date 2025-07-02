@@ -144,10 +144,11 @@ class RecordingService {
       totalPages: number
     }
   }> {
+    // 正确的参数处理：先展开filter，再设置默认值，避免参数冲突
     const params = {
+      ...filter,
       page: filter?.page || 1,
-      page_size: filter?.page_size || 20,
-      ...filter
+      page_size: filter?.page_size || 12
     }
     return http.get('/api/recordings', { params })
   }

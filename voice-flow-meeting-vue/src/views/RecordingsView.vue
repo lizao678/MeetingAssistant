@@ -206,7 +206,7 @@ const fetchRecordings = async () => {
     // 构建查询参数
     const params = {
       page: currentPage.value,
-      limit: pageSize.value,
+      page_size: pageSize.value,  // 修正参数名为page_size，与后端API一致
       search: searchQuery.value,
       ...currentFilters.value
     }
