@@ -109,6 +109,68 @@
             {{ isTimeLimit ? '已达到最大录音时长' : '即将达到最大录音时长' }}
           </el-text>
         </div>
+        
+        <!-- 音频质量监控面板 -->
+        <div v-if="isRecording && !isPaused" class="audio-quality-panel">
+          <div class="quality-header">
+            <h4>🎙️ 音频增强实时监控</h4>
+            <el-tag 
+              :type="audioQuality.qualityLevel === 'excellent' ? 'success' : 
+                     audioQuality.qualityLevel === 'good' ? 'primary' :
+                     audioQuality.qualityLevel === 'fair' ? 'warning' : 'danger'"
+              size="small"
+            >
+              {{ audioQuality.qualityLevel === 'excellent' ? '🟢 优秀' :
+                 audioQuality.qualityLevel === 'good' ? '🔵 良好' :
+                 audioQuality.qualityLevel === 'fair' ? '🟡 一般' : '🔴 较差' }}
+            </el-tag>
+          </div>
+          
+          <div class="quality-metrics">
+            <div class="metric-item">
+              <span class="metric-label">音量强度:</span>
+              <el-progress 
+                :percentage="Math.min(audioQuality.rms * 500, 100)" 
+                :show-text="false"
+                :stroke-width="4"
+                color="#67c23a"
+              />
+              <span class="metric-value">{{ (audioQuality.rms * 100).toFixed(1) }}%</span>
+            </div>
+            
+            <div class="metric-item">
+              <span class="metric-label">信噪比:</span>
+              <el-progress 
+                :percentage="Math.max(0, Math.min((audioQuality.snr + 20) * 2, 100))" 
+                :show-text="false"
+                :stroke-width="4"
+                :color="audioQuality.snr >= 20 ? '#67c23a' : audioQuality.snr >= 10 ? '#e6a23c' : '#f56c6c'"
+              />
+              <span class="metric-value">{{ audioQuality.snr.toFixed(1) }}dB</span>
+            </div>
+            
+            <div class="metric-item">
+              <span class="metric-label">动态增益:</span>
+              <el-progress 
+                :percentage="Math.min(audioQuality.gain * 25, 100)" 
+                :show-text="false"
+                :stroke-width="4"
+                color="#409eff"
+              />
+              <span class="metric-value">{{ audioQuality.gain.toFixed(1) }}x</span>
+            </div>
+          </div>
+          
+          <div class="enhancement-status">
+            <div class="enhancement-items">
+              <el-tag size="small" type="success">✓ 回声消除</el-tag>
+              <el-tag size="small" type="success">✓ 噪声抑制</el-tag>
+              <el-tag size="small" type="success">✓ 动态压缩</el-tag>
+              <el-tag size="small" type="success">✓ 自动增益</el-tag>
+              <el-tag size="small" type="success">✓ 滤波增强</el-tag>
+            </div>
+          </div>
+        </div>
       </div>
     </el-card>
 
@@ -194,6 +256,16 @@ const selectedLang = ref('zh')
 const speakerVerification = ref(true)
 const messages = ref<AudioMessage[]>([])
 const messagesContainer = ref<HTMLElement>()
+
+// 音频质量监控
+const audioQuality = ref({
+  rms: 0,
+  peak: 0,
+  snr: 0,
+  gain: 1.0,
+  qualityLevel: 'excellent' as 'poor' | 'fair' | 'good' | 'excellent'
+})
+let qualityUpdateTimer: number | null = null
 
 // 录音时长相关
 const recordingDuration = ref(0) // 已录制时长(秒)
@@ -352,7 +424,7 @@ const addMessage = (data: any) => {
   })
 }
 
-// 创建PCM录音器
+// 创建增强版PCM录音器 - 添加专业音频处理链
 const createPCMRecorder = (stream: MediaStream) => {
   const sampleBits = 16 // 采样位数
   const inputSampleRate = 48000 // 输入采样率
@@ -361,7 +433,138 @@ const createPCMRecorder = (stream: MediaStream) => {
   
   const context = new AudioContext()
   const audioInput = context.createMediaStreamSource(stream)
+  
+  // 🎯 创建完整的音频处理链
+  
+  // 1. 高通滤波器 - 去除低频噪音（50Hz以下）
+  const highpassFilter = context.createBiquadFilter()
+  highpassFilter.type = 'highpass'
+  highpassFilter.frequency.setValueAtTime(50, context.currentTime) // 50Hz截止频率
+  highpassFilter.Q.setValueAtTime(0.7, context.currentTime)
+  
+  // 2. 动态压缩器 - 平衡音量，提升清晰度
+  const compressor = context.createDynamicsCompressor()
+  compressor.threshold.setValueAtTime(-24, context.currentTime)    // 压缩阈值
+  compressor.knee.setValueAtTime(30, context.currentTime)         // 软启动
+  compressor.ratio.setValueAtTime(12, context.currentTime)        // 压缩比
+  compressor.attack.setValueAtTime(0.003, context.currentTime)    // 快速响应
+  compressor.release.setValueAtTime(0.25, context.currentTime)    // 适中释放
+  
+  // 3. 增益控制器 - 音量标准化
+  const gainNode = context.createGain()
+  gainNode.gain.setValueAtTime(1.5, context.currentTime)          // 适度增益
+  
+  // 4. 低通滤波器 - 去除高频噪音（8kHz以上）
+  const lowpassFilter = context.createBiquadFilter()
+  lowpassFilter.type = 'lowpass'
+  lowpassFilter.frequency.setValueAtTime(8000, context.currentTime) // 8kHz截止
+  lowpassFilter.Q.setValueAtTime(0.7, context.currentTime)
+  
+  // 5. 最终处理节点
   const scriptProcessor = context.createScriptProcessor(4096, channelCount, channelCount)
+  
+  // 🔗 连接音频处理链：输入 → 高通 → 压缩 → 增益 → 低通 → 处理器
+  audioInput.connect(highpassFilter)
+  highpassFilter.connect(compressor)
+  compressor.connect(gainNode)
+  gainNode.connect(lowpassFilter)
+  lowpassFilter.connect(scriptProcessor)
+  
+  // 🎯 音频增强处理器
+  const audioEnhancer = {
+    // 噪声门限和统计
+    noiseFloor: -60,              // 噪声基线 (dB)
+    silenceThreshold: 0.01,       // 静音阈值
+    rmsHistory: [] as number[],   // RMS历史记录
+    maxRmsHistory: 100,           // 保留最近100个RMS值
+    
+    // 动态参数
+    currentGain: 1.0,             // 当前增益
+    targetGain: 1.0,              // 目标增益
+    gainSmoothingFactor: 0.95,    // 增益平滑系数
+    
+    // 音频统计分析
+    analyzeAudio(buffer: Float32Array): { rms: number, peak: number, snr: number } {
+      // 计算RMS（均方根）
+      let sum = 0
+      let peak = 0
+      for (let i = 0; i < buffer.length; i++) {
+        const sample = buffer[i]
+        sum += sample * sample
+        peak = Math.max(peak, Math.abs(sample))
+      }
+      const rms = Math.sqrt(sum / buffer.length)
+      
+      // 更新RMS历史
+      this.rmsHistory.push(rms)
+      if (this.rmsHistory.length > this.maxRmsHistory) {
+        this.rmsHistory.shift()
+      }
+      
+      // 计算信噪比
+      const avgNoise = this.rmsHistory.slice(0, 20).reduce((a, b) => a + b, 0) / 20 || 0.001
+      const snr = rms > 0 ? 20 * Math.log10(rms / Math.max(avgNoise, 0.001)) : -60
+      
+      return { rms, peak, snr }
+    },
+    
+    // 动态降噪处理
+    denoiseBuffer(buffer: Float32Array): Float32Array {
+      const stats = this.analyzeAudio(buffer)
+      const enhanced = new Float32Array(buffer.length)
+      
+      // 自适应噪声门限
+      const adaptiveThreshold = Math.max(this.silenceThreshold, stats.rms * 0.1)
+      
+      for (let i = 0; i < buffer.length; i++) {
+        let sample = buffer[i]
+        const amplitude = Math.abs(sample)
+        
+        // 噪声门处理
+        if (amplitude < adaptiveThreshold) {
+          sample *= 0.1 // 大幅衰减噪声
+        } else {
+          // 光谱减法降噪 (简化版)
+          const noiseFactor = Math.max(0, 1 - (adaptiveThreshold / amplitude) * 0.5)
+          sample *= noiseFactor
+        }
+        
+        enhanced[i] = sample
+      }
+      
+      return enhanced
+    },
+    
+    // 动态范围压缩和标准化
+    normalizeAudio(buffer: Float32Array): Float32Array {
+      const stats = this.analyzeAudio(buffer)
+      
+      // 计算目标增益（基于RMS自动调整）
+      const targetRMS = 0.15 // 目标RMS电平
+      if (stats.rms > 0.001) {
+        this.targetGain = Math.min(targetRMS / stats.rms, 4.0) // 最大4倍增益
+      }
+      
+      // 平滑增益变化，避免突变
+      this.currentGain = this.currentGain * this.gainSmoothingFactor + 
+                        this.targetGain * (1 - this.gainSmoothingFactor)
+      
+      // 应用增益和软限制
+      const normalized = new Float32Array(buffer.length)
+      for (let i = 0; i < buffer.length; i++) {
+        let sample = buffer[i] * this.currentGain
+        
+        // 软限制防止削波
+        if (Math.abs(sample) > 0.95) {
+          sample = Math.sign(sample) * (0.95 - (Math.abs(sample) - 0.95) * 0.1)
+        }
+        
+        normalized[i] = sample
+      }
+      
+      return normalized
+    }
+  }
   
   const audioData = {
     size: 0,
@@ -371,11 +574,21 @@ const createPCMRecorder = (stream: MediaStream) => {
       this.size = 0
     },
     input(data: Float32Array) {
-      this.buffer.push(new Float32Array(data))
-      this.size += data.length
+      // 🚀 应用音频增强处理
+      let enhancedData = data
+      
+      // 1. 动态降噪
+      enhancedData = audioEnhancer.denoiseBuffer(enhancedData)
+      
+      // 2. 音频标准化和压缩
+      enhancedData = audioEnhancer.normalizeAudio(enhancedData)
+      
+      // 保存处理后的数据
+      this.buffer.push(new Float32Array(enhancedData))
+      this.size += enhancedData.length
       
       // 同时保存到完整缓冲区
-      completeAudioBuffer.push(new Float32Array(data))
+      completeAudioBuffer.push(new Float32Array(enhancedData))
     },
     encodePCM() {
       const bytes = new Float32Array(this.size)
@@ -434,13 +647,49 @@ const createPCMRecorder = (stream: MediaStream) => {
     audioData.input(resampledData)
   }
   
+  // 🎯 添加音频质量监控
+  let qualityStats = {
+    averageRMS: 0,
+    peakLevel: 0,
+    snr: 0,
+    processingGain: 1.0
+  }
+  
+  // 修改音频处理函数，添加质量监控
+  const originalOnaudioprocess = scriptProcessor.onaudioprocess
+  scriptProcessor.onaudioprocess = (e) => {
+    const inputData = e.inputBuffer.getChannelData(0)
+    
+    // 更新质量统计
+    qualityStats.averageRMS = audioEnhancer.rmsHistory.slice(-10).reduce((a, b) => a + b, 0) / 10 || 0
+    qualityStats.peakLevel = Math.max(...Array.from(inputData).map(Math.abs))
+    qualityStats.processingGain = audioEnhancer.currentGain
+    
+    // 降采样处理
+    const resampledData = downsampleBuffer(inputData, inputSampleRate, outputSampleRate)
+    audioData.input(resampledData)
+  }
+  
   return {
     start() {
-      audioInput.connect(scriptProcessor)
+      // 不再需要直接连接到destination，因为我们已经有了完整的处理链
       scriptProcessor.connect(context.destination)
     },
     stop() {
+      // 断开所有连接
       scriptProcessor.disconnect()
+      lowpassFilter.disconnect()
+      gainNode.disconnect()
+      compressor.disconnect()
+      highpassFilter.disconnect()
+    },
+    // 新增：获取音频质量统计
+    getQualityStats() {
+      return {
+        ...qualityStats,
+        snr: audioEnhancer.rmsHistory.length > 10 ? 
+          20 * Math.log10(qualityStats.averageRMS / (audioEnhancer.rmsHistory[0] || 0.001)) : 0
+      }
     },
     getBlob() {
       return audioData.encodePCM()
@@ -608,6 +857,55 @@ const stopRecordingTimer = () => {
   }
 }
 
+// 开始音频质量监控
+const startQualityMonitoring = () => {
+  if (qualityUpdateTimer) {
+    clearInterval(qualityUpdateTimer)
+  }
+  
+  qualityUpdateTimer = setInterval(() => {
+    if (recorder && isRecording.value && !isPaused.value) {
+      try {
+        const stats = recorder.getQualityStats()
+        audioQuality.value.rms = Math.round(stats.averageRMS * 100) / 100
+        audioQuality.value.peak = Math.round(stats.peakLevel * 100) / 100
+        audioQuality.value.snr = Math.round(stats.snr * 10) / 10
+        audioQuality.value.gain = Math.round(stats.processingGain * 100) / 100
+        
+        // 根据信噪比判断质量等级
+        if (stats.snr >= 20) {
+          audioQuality.value.qualityLevel = 'excellent'
+        } else if (stats.snr >= 10) {
+          audioQuality.value.qualityLevel = 'good'
+        } else if (stats.snr >= 0) {
+          audioQuality.value.qualityLevel = 'fair'
+        } else {
+          audioQuality.value.qualityLevel = 'poor'
+        }
+      } catch (error) {
+        console.log('音频质量监控更新失败:', error)
+      }
+    }
+  }, 200) // 每200ms更新一次
+}
+
+// 停止音频质量监控
+const stopQualityMonitoring = () => {
+  if (qualityUpdateTimer) {
+    clearInterval(qualityUpdateTimer)
+    qualityUpdateTimer = null
+  }
+  
+  // 重置质量数据
+  audioQuality.value = {
+    rms: 0,
+    peak: 0,
+    snr: 0,
+    gain: 1.0,
+    qualityLevel: 'excellent'
+  }
+}
+
 // 开始录音
 const startRecording = async () => {
   try {
@@ -616,13 +914,35 @@ const startRecording = async () => {
     // 清空之前的音频数据
     completeAudioBuffer = []
     
-    // 获取音频流
+    // 获取音频流 - 添加完整的音频增强参数
+    const audioConstraints: any = {
+      // 基础增强功能
+      echoCancellation: true,          // 回声消除
+      noiseSuppression: true,          // 噪声抑制
+      autoGainControl: true,           // 自动增益控制
+      
+      // 高级音频参数
+      sampleRate: 48000,               // 高采样率获取更多细节
+      sampleSize: 16,                  // 16位采样深度
+      channelCount: 1,                 // 单声道
+      
+      // 动态增强参数（Chrome特有）
+      googEchoCancellation: true,      // Google回声消除
+      googAutoGainControl: true,       // Google自动增益
+      googNoiseSuppression: true,      // Google噪声抑制
+      googHighpassFilter: true,        // 高通滤波器
+      googTypingNoiseDetection: true,  // 键盘噪音检测
+      googBeamforming: true,           // 波束成形
+      googArrayGeometry: true,         // 阵列几何
+      googAudioMirroring: false,       // 禁用音频镜像
+      
+      // 延迟和处理优化
+      latency: 0.02,                   // 低延迟（20ms）
+      volume: 1.0                      // 标准音量
+    }
+    
     const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        sampleRate: 48000 // 使用默认采样率，后续降采样到16kHz
-      }
+      audio: audioConstraints
     })
     
     // 建立WebSocket连接
@@ -659,7 +979,10 @@ const startRecording = async () => {
       // 开始录音计时器
       startRecordingTimer()
       
-      ElMessage.success('开始录音')
+      // 开始音频质量监控
+      startQualityMonitoring()
+      
+      ElMessage.success('🎙️ 开始录音 - 音频增强已启用')
     }
     
     ws.onmessage = (event) => {
@@ -704,6 +1027,9 @@ const stopRecording = async (showMessage = true) => {
   }
   
   stopRecordingTimer()
+  
+  // 停止音频质量监控
+  stopQualityMonitoring()
   
   // 保存最终的完整音频数据（在销毁recorder之前）
   let finalAudioBlob: Blob | undefined = undefined
@@ -872,6 +1198,7 @@ onMounted(() => {
 onUnmounted(() => {
   stopRecording(false) // 组件卸载时静默停止录音，不显示提示
   stopRecordingTimer() // 确保清理所有定时器
+  stopQualityMonitoring() // 清理音频质量监控定时器
 })
 </script>
 
@@ -979,6 +1306,118 @@ onUnmounted(() => {
 
 .pause-button {
   font-weight: 600;
+}
+
+/* 音频质量监控面板样式 */
+.audio-quality-panel {
+  margin-top: 20px;
+  padding: 16px 20px;
+  background: linear-gradient(135deg, #f8fffe 0%, #f0f9ff 100%);
+  border-radius: 12px;
+  border: 1px solid #e1f5fe;
+  box-shadow: 0 2px 8px rgba(0, 100, 200, 0.1);
+  max-width: 600px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.quality-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.quality-header h4 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #2c3e50;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.quality-metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.metric-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.metric-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: #606266;
+  min-width: 80px;
+  flex-shrink: 0;
+}
+
+.metric-item .el-progress {
+  flex: 1;
+  max-width: 200px;
+}
+
+.metric-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: #409eff;
+  font-family: 'SF Mono', 'Monaco', 'Menlo', 'Courier New', monospace;
+  min-width: 50px;
+  text-align: right;
+}
+
+.enhancement-status {
+  border-top: 1px solid #e1f5fe;
+  padding-top: 12px;
+}
+
+.enhancement-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: center;
+}
+
+.enhancement-items .el-tag {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 12px;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+  .audio-quality-panel {
+    margin: 16px -4px 0;
+    border-radius: 8px;
+  }
+  
+  .quality-metrics {
+    gap: 8px;
+  }
+  
+  .metric-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 6px 0;
+  }
+  
+  .metric-item .el-progress {
+    width: 100%;
+    max-width: none;
+  }
+  
+  .enhancement-items {
+    justify-content: flex-start;
+  }
 }
 
 .record-button {
