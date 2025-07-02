@@ -323,33 +323,44 @@ const handleError = (error: Event) => {
   const errorCode = audioEl.error?.code
   const errorMessage = audioEl.error?.message
   
-  let userMessage = '音频加载失败'
-  
-  // 根据错误代码提供更具体的错误信息
-  switch (errorCode) {
-    case 1: // MEDIA_ERR_ABORTED
-      userMessage = '音频加载被中止'
-      break
-    case 2: // MEDIA_ERR_NETWORK
-      userMessage = '网络错误，无法加载音频'
-      break
-    case 3: // MEDIA_ERR_DECODE
-      userMessage = '音频文件格式不支持或已损坏'
-      break
-    case 4: // MEDIA_ERR_SRC_NOT_SUPPORTED
-      userMessage = '音频文件格式不支持'
-      break
-    default:
-      userMessage = `音频加载失败: ${errorMessage || '未知错误'}`
+  // 如果没有设置音频URL，不显示错误（避免初始化时的误报）
+  if (!props.audioUrl || props.audioUrl === '') {
+    console.debug('Audio error ignored: no audio URL set')
+    return
   }
   
-  ElMessage.error(userMessage)
-  console.error('Audio error details:', {
+  // 只记录到控制台，不立即弹出错误提示
+  console.warn('Audio error details:', {
     code: errorCode,
     message: errorMessage,
     src: audioEl.src,
     error: error
   })
+  
+  // 只有在用户尝试播放时出错才显示错误提示
+  if (isPlaying.value) {
+    let userMessage = '音频播放失败'
+    
+    // 根据错误代码提供更具体的错误信息
+    switch (errorCode) {
+      case 1: // MEDIA_ERR_ABORTED
+        userMessage = '音频播放被中止'
+        break
+      case 2: // MEDIA_ERR_NETWORK
+        userMessage = '网络错误，无法播放音频'
+        break
+      case 3: // MEDIA_ERR_DECODE
+        userMessage = '音频文件已损坏，无法播放'
+        break
+      case 4: // MEDIA_ERR_SRC_NOT_SUPPORTED
+        userMessage = '当前浏览器不支持此音频格式'
+        break
+      default:
+        userMessage = `音频播放失败: ${errorMessage || '未知错误'}`
+    }
+    
+    ElMessage.error(userMessage)
+  }
 }
 
 // 监听播放状态

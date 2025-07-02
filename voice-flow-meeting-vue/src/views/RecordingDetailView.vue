@@ -218,7 +218,7 @@
     </div>
 
     <!-- 底部音频播放器 -->
-    <div class="audio-player-section">
+    <div v-if="recordingDetail.audioUrl" class="audio-player-section">
       <AudioPlayer
         :audio-url="recordingDetail.audioUrl"
         :segments="audioSegments"
@@ -228,6 +228,12 @@
         @play-state-change="handlePlayStateChange"
       />
     </div>
+    <div v-else class="audio-player-placeholder">
+      <div class="placeholder-content">
+        <el-icon><Loading /></el-icon>
+        <span>正在加载音频播放器...</span>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -235,7 +241,9 @@
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
+import { Loading } from '@element-plus/icons-vue'
 import recordingService from '@/services/recordingService'
+import http from '@/services/http'
 import type { RecordingDetail, SpeechSegment, IntelligentSummary, Keyword } from '@/services/recordingService'
 import AudioPlayer from '@/components/AudioPlayer.vue'
 
@@ -562,7 +570,7 @@ const loadRecordingDetail = async () => {
         language: recording.language,
         createTime: recording.createTime,
         speakerCount: recording.speakerCount,
-        audioUrl: `/api/recordings/${recording.id}/download`,
+        audioUrl: `${http.defaults.baseURL}/api/recordings/${recording.id}/download`,
         status: recording.status
       }
       
@@ -1027,6 +1035,25 @@ onUnmounted(() => {
   padding: 16px 24px;
   box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.1);
   z-index: 100;
+}
+
+.audio-player-placeholder {
+  position: sticky;
+  bottom: 0;
+  background: white;
+  border-top: 1px solid #e4e7ed;
+  padding: 24px;
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.1);
+  z-index: 100;
+}
+
+.placeholder-content {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: #909399;
+  font-size: 14px;
 }
 
 .empty-state {

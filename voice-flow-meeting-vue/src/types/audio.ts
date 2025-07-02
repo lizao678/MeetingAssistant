@@ -47,6 +47,38 @@ export interface RecordingFile {
   file_path: string
 }
 
+// 扩展的录音详情接口（用于列表页面）
+export interface RecordingDetail {
+  id: string
+  title: string
+  duration: string // 格式化的时长字符串 如 "05:30"
+  fileSize: number // 文件大小（字节）
+  createTime: string // 创建时间
+  updateTime: string // 更新时间
+  status: 'processing' | 'completed' | 'failed'
+  language: string // 语言
+  speakerCount: number // 发言人数
+  summary?: {
+    content: string
+    quality: number
+    wordCount: number
+    keyPoints: string[]
+  }
+  keywords?: {
+    keyword: string
+    frequency: number
+    importance: number
+  }[]
+  segments?: {
+    id: string
+    speakerId: string
+    content: string
+    startTime: number
+    endTime: number
+    confidence: number
+  }[]
+}
+
 // 会议总结接口
 export interface MeetingSummary {
   id: number
