@@ -470,8 +470,26 @@ const createAudioProcessor = (stream: MediaStream) => {
   // 创建基础处理节点
   const scriptProcessor = context.createScriptProcessor(4096, channelCount, channelCount)
   
-  // 直接连接到输出，跳过所有增强处理
-  audioInput.connect(scriptProcessor)
+  // 只添加最基础的处理
+  // 1. 高通滤波器 - 去除低频噪声
+  const highpassFilter = context.createBiquadFilter()
+  highpassFilter.type = 'highpass'
+  highpassFilter.frequency.setValueAtTime(80, context.currentTime)
+  
+  // 2. 轻微压缩 - 只为了控制过大的音量波动
+  const compressor = context.createDynamicsCompressor()
+  compressor.threshold.setValueAtTime(-24, context.currentTime)
+  compressor.knee.setValueAtTime(30, context.currentTime)
+  compressor.ratio.setValueAtTime(2, context.currentTime)  // 最轻微的压缩比
+  compressor.attack.setValueAtTime(0.05, context.currentTime)
+  compressor.release.setValueAtTime(0.25, context.currentTime)
+  
+  // 连接处理链
+  audioInput
+    .connect(highpassFilter)
+    .connect(compressor)
+    .connect(scriptProcessor)
+  scriptProcessor.connect(context.destination)
   
   const audioData = {
     size: 0,
@@ -481,11 +499,8 @@ const createAudioProcessor = (stream: MediaStream) => {
       this.size = 0
     },
     input(data: Float32Array) {
-      // 直接保存原始数据，不做任何处理
       this.buffer.push(new Float32Array(data))
       this.size += data.length
-      
-      // 同时保存到完整缓冲区
       completeAudioBuffer.push(new Float32Array(data))
     },
     encodePCM() {

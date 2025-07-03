@@ -14,6 +14,7 @@ from loguru import logger
 import tempfile
 import json
 from datetime import datetime
+import signal
 
 from ai_service import ai_service
 from database import db_manager
@@ -936,6 +937,44 @@ class RecordingProcessor:
         except Exception as e:
             logger.error(f"重新生成摘要失败: {str(e)}")
             return {"error": str(e)}
+
+    def _preprocess_audio_light(self, audio_data: np.ndarray, sample_rate: int) -> np.ndarray:
+        """轻量级音频预处理
+        - 只做基础降噪
+        - 不做增强
+        - 保持音频特征
+        """
+        if len(audio_data) == 0:
+            return audio_data
+        
+        # 1. 直流分量去除
+        audio_data = audio_data - np.mean(audio_data)
+        
+        # 2. 简单的高通滤波（去除低频噪声）
+        nyquist = sample_rate // 2
+        cutoff = 80  # 80Hz高通
+        b, a = signal.butter(2, cutoff/nyquist, btype='high')
+        audio_data = signal.filtfilt(b, a, audio_data)
+        
+        # 3. 轻微的噪声门限（保留大部分信号）
+        noise_gate = np.std(audio_data) * 0.1
+        audio_data[np.abs(audio_data) < noise_gate] = 0
+        
+        return audio_data
+
+    def process_audio_chunk(self, chunk: np.ndarray, sample_rate: int) -> Tuple[np.ndarray, bool]:
+        """处理音频片段
+        Returns:
+            Tuple[np.ndarray, bool]: (处理后的音频, 是否有效)
+        """
+        # 1. 检查音频是否有效
+        if not self._is_valid_audio_chunk(chunk, sample_rate):
+            return chunk, False
+        
+        # 2. 轻量级预处理
+        processed = self._preprocess_audio_light(chunk, sample_rate)
+        
+        return processed, True
 
 
 # 全局录音处理器实例

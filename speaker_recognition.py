@@ -12,6 +12,25 @@ from config import config
 from model_service import async_sv_pipeline
 
 
+class SpeakerRecognitionConfig:
+    """说话人识别配置"""
+    # 降低基础阈值
+    BASE_SIMILARITY_THRESHOLD = 0.25  # 原为0.35
+    # 降低最小阈值
+    MIN_SIMILARITY_THRESHOLD = 0.20   # 原为0.28
+    # 降低最大阈值
+    MAX_SIMILARITY_THRESHOLD = 0.40   # 原为0.45
+    # 降低连续性阈值增长率
+    CONTINUITY_THRESHOLD_INCREASE = 0.05  # 原为0.09
+    
+    # 其他配置保持不变
+    MAX_SPEAKERS = 10
+    EMBEDDING_DIMENSION = 192
+    MIN_AUDIO_DURATION = 1.0
+    MAX_AUDIO_DURATION = 10.0
+    SAMPLE_RATE = 16000
+
+
 def check_audio_quality(audio_segment: np.ndarray, sample_rate: int = 16000) -> bool:
     """
     检查音频质量，确保适合进行说话人识别
