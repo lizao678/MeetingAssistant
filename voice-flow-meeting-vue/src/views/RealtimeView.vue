@@ -245,6 +245,7 @@ import { useRouter } from 'vue-router'
 import SpeakerCountDialog from '../components/SpeakerCountDialog.vue'
 import recordingService from '@/services/recordingService'
 import type { AudioMessage, RecordingStatus, SpeakerInfo } from '../types/audio'
+import { useRecordingRouteGuard } from '@/composables/useRouteGuard'
 
 const router = useRouter()
 
@@ -1190,15 +1191,39 @@ const handleSpeakerDialogCancel = () => {
   ElMessage.info('已取消保存录音')
 }
 
-// 生命周期
+// 使用统一的路由拦截管理
+useRecordingRouteGuard(
+  () => isRecording.value, // 拦截条件：正在录音时
+  async () => {
+    // 确认退出时的回调：停止录音（不显示提示）
+    if (isRecording.value) {
+      await stopRecording(false)
+    }
+  }
+)
+
+// 页面可见性变化处理
+const handleVisibilityChange = () => {
+  if (document.hidden && isRecording.value) {
+    console.log('页面隐藏，录音仍在进行中')
+  }
+}
+
+// 组件挂载时添加事件监听
 onMounted(() => {
   console.log('实时语音识别页面已加载')
+  document.addEventListener('visibilitychange', handleVisibilityChange)
 })
 
+// 组件卸载时移除事件监听
 onUnmounted(() => {
-  stopRecording(false) // 组件卸载时静默停止录音，不显示提示
-  stopRecordingTimer() // 确保清理所有定时器
-  stopQualityMonitoring() // 清理音频质量监控定时器
+  console.log('实时语音识别页面已卸载')
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+  
+  // 清理录音相关资源
+  if (isRecording.value) {
+    stopRecording(false)
+  }
 })
 </script>
 

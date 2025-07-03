@@ -74,7 +74,7 @@ class AudioProcessingConfig:
     MIN_ENERGY_THRESHOLD = 0.0001  # 最低能量阈值（降低以接受更多语音）
     MAX_ENERGY_THRESHOLD = 0.1  # 最高能量阈值
     SNR_THRESHOLD = 5.0  # 信噪比阈值（dB）（降低要求）
-    ZERO_CROSSING_THRESHOLD = 0.15  # 零穿越率阈值（比例，0-1之间）
+    ZERO_CROSSING_THRESHOLD = 0.30  # 零穿越率阈值（提高到0.30，允许更多语音通过）
     
     # 采样率配置
     TARGET_SAMPLE_RATE = 16000  # 目标采样率
