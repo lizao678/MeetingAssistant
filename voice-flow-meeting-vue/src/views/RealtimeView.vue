@@ -246,8 +246,14 @@ import SpeakerCountDialog from '../components/SpeakerCountDialog.vue'
 import recordingService from '@/services/recordingService'
 import type { AudioMessage, RecordingStatus, SpeakerInfo } from '../types/audio'
 import { useRecordingRouteGuard } from '@/composables/useRouteGuard'
+import { useSettingsStore } from '@/stores/settingsStore'
+import { storeToRefs } from 'pinia'
 
 const router = useRouter()
+
+// 获取设置
+const settingsStore = useSettingsStore()
+const { speechSettings } = storeToRefs(settingsStore)
 
 // 响应式数据
 const isRecording = ref(false)
@@ -425,12 +431,38 @@ const addMessage = (data: any) => {
   })
 }
 
-// 创建增强版PCM录音器 - 添加专业音频处理链
-const createPCMRecorder = (stream: MediaStream) => {
-  const sampleBits = 16 // 采样位数
-  const inputSampleRate = 48000 // 输入采样率
-  const outputSampleRate = 16000 // 输出采样率
-  const channelCount = 1 // 单声道
+// 音频增强器接口
+interface AudioEnhancer {
+  noiseFloor: number
+  silenceThreshold: number
+  rmsHistory: number[]
+  maxRmsHistory: number
+  currentGain: number
+  targetGain: number
+  gainSmoothingFactor: number
+  targetRMS: number
+  maxGain: number
+  enableAutoGain: boolean
+  enableNoiseSuppression: boolean
+  analyzeAudio(buffer: Float32Array): { rms: number; peak: number; snr: number }
+  denoiseBuffer(buffer: Float32Array): Float32Array
+  normalizeAudio(buffer: Float32Array): Float32Array
+}
+
+// 增强参数接口
+interface EnhancementParams {
+  compressorRatio: number
+  gain: number
+  targetRMS: number
+  maxGain: number
+}
+
+// 创建音频处理器
+const createAudioProcessor = (stream: MediaStream) => {
+  const sampleBits = 16
+  const inputSampleRate = 48000
+  const outputSampleRate = 16000
+  const channelCount = 1
   
   const context = new AudioContext()
   const audioInput = context.createMediaStreamSource(stream)
@@ -443,17 +475,17 @@ const createPCMRecorder = (stream: MediaStream) => {
   highpassFilter.frequency.setValueAtTime(50, context.currentTime) // 50Hz截止频率
   highpassFilter.Q.setValueAtTime(0.7, context.currentTime)
   
-  // 2. 动态压缩器 - 平衡音量，提升清晰度
+  // 2. 压缩器 - 降低压缩比和增益
   const compressor = context.createDynamicsCompressor()
-  compressor.threshold.setValueAtTime(-24, context.currentTime)    // 压缩阈值
-  compressor.knee.setValueAtTime(30, context.currentTime)         // 软启动
-  compressor.ratio.setValueAtTime(12, context.currentTime)        // 压缩比
-  compressor.attack.setValueAtTime(0.003, context.currentTime)    // 快速响应
-  compressor.release.setValueAtTime(0.25, context.currentTime)    // 适中释放
+  compressor.threshold.setValueAtTime(-24, context.currentTime)  // 提高阈值
+  compressor.knee.setValueAtTime(30, context.currentTime)       // 更柔和的压缩过渡
+  compressor.ratio.setValueAtTime(3, context.currentTime)       // 降低压缩比
+  compressor.attack.setValueAtTime(0.05, context.currentTime)   // 更快的起音
+  compressor.release.setValueAtTime(0.25, context.currentTime)  // 更快的释放
   
-  // 3. 增益控制器 - 音量标准化
+  // 3. 增益节点 - 降低增益
   const gainNode = context.createGain()
-  gainNode.gain.setValueAtTime(1.5, context.currentTime)          // 适度增益
+  gainNode.gain.setValueAtTime(1.0, context.currentTime)        // 降低到1.0，不额外增益
   
   // 4. 低通滤波器 - 去除高频噪音（8kHz以上）
   const lowpassFilter = context.createBiquadFilter()
@@ -472,20 +504,19 @@ const createPCMRecorder = (stream: MediaStream) => {
   lowpassFilter.connect(scriptProcessor)
   
   // 🎯 音频增强处理器
-  const audioEnhancer = {
-    // 噪声门限和统计
-    noiseFloor: -60,              // 噪声基线 (dB)
-    silenceThreshold: 0.01,       // 静音阈值
-    rmsHistory: [] as number[],   // RMS历史记录
-    maxRmsHistory: 100,           // 保留最近100个RMS值
-    
-    // 动态参数
-    currentGain: 1.0,             // 当前增益
-    targetGain: 1.0,              // 目标增益
-    gainSmoothingFactor: 0.95,    // 增益平滑系数
-    
-    // 音频统计分析
-    analyzeAudio(buffer: Float32Array): { rms: number, peak: number, snr: number } {
+  const audioEnhancer: AudioEnhancer = {
+    noiseFloor: -50,
+    silenceThreshold: 0.02,
+    rmsHistory: [],
+    maxRmsHistory: 100,
+    currentGain: 1.0,
+    targetGain: 1.0,
+    gainSmoothingFactor: 0.98,
+    targetRMS: 0.08,
+    maxGain: 2.0,
+    enableAutoGain: true,
+    enableNoiseSuppression: true,
+    analyzeAudio(buffer: Float32Array) {
       // 计算RMS（均方根）
       let sum = 0
       let peak = 0
@@ -508,9 +539,7 @@ const createPCMRecorder = (stream: MediaStream) => {
       
       return { rms, peak, snr }
     },
-    
-    // 动态降噪处理
-    denoiseBuffer(buffer: Float32Array): Float32Array {
+    denoiseBuffer(buffer: Float32Array) {
       const stats = this.analyzeAudio(buffer)
       const enhanced = new Float32Array(buffer.length)
       
@@ -535,15 +564,13 @@ const createPCMRecorder = (stream: MediaStream) => {
       
       return enhanced
     },
-    
-    // 动态范围压缩和标准化
-    normalizeAudio(buffer: Float32Array): Float32Array {
+    normalizeAudio(buffer: Float32Array) {
       const stats = this.analyzeAudio(buffer)
       
-      // 计算目标增益（基于RMS自动调整）
-      const targetRMS = 0.15 // 目标RMS电平
+      // 降低目标RMS电平和最大增益
+      const targetRMS = 0.08 // 降低目标RMS电平
       if (stats.rms > 0.001) {
-        this.targetGain = Math.min(targetRMS / stats.rms, 4.0) // 最大4倍增益
+        this.targetGain = Math.min(targetRMS / stats.rms, 2.0) // 最大2倍增益
       }
       
       // 平滑增益变化，避免突变
@@ -671,7 +698,78 @@ const createPCMRecorder = (stream: MediaStream) => {
     audioData.input(resampledData)
   }
   
-  return {
+  // 根据设置决定是否启用音频增强
+  if (!speechSettings.value.enableAudioEnhancement) {
+    // 直接连接到输出，跳过增强处理
+    audioInput.connect(scriptProcessor)
+    scriptProcessor.connect(context.destination)
+    return {
+      start() {},
+      stop() {
+        scriptProcessor.disconnect()
+        audioInput.disconnect()
+      },
+      getQualityStats() {
+        return {
+          averageRMS: 0,
+          peakLevel: 0,
+          snr: 0,
+          processingGain: 1.0
+        }
+      },
+      getBlob() {
+        return audioData.encodePCM()
+      },
+      clear() {
+        audioData.clear()
+      },
+      getCompleteAudioWAV() {
+        return createWAVBlob(completeAudioBuffer, outputSampleRate)
+      }
+    }
+  }
+
+  // 根据增强级别设置参数
+  const enhancementLevel = speechSettings.value.enhancementLevel
+  const params: Record<string, EnhancementParams> = {
+    light: {
+      compressorRatio: 2,
+      gain: 1.0,
+      targetRMS: 0.05,
+      maxGain: 1.5
+    },
+    medium: {
+      compressorRatio: 3,
+      gain: 1.0,
+      targetRMS: 0.08,
+      maxGain: 2.0
+    },
+    strong: {
+      compressorRatio: 4,
+      gain: 1.2,
+      targetRMS: 0.12,
+      maxGain: 2.5
+    }
+  }
+  
+  const currentParams = params[enhancementLevel]
+  
+  // 应用参数
+  compressor.ratio.setValueAtTime(currentParams.compressorRatio, context.currentTime)
+  gainNode.gain.setValueAtTime(currentParams.gain, context.currentTime)
+  
+  // 更新音频增强器参数
+  audioEnhancer.targetRMS = currentParams.targetRMS
+  audioEnhancer.maxGain = currentParams.maxGain
+  
+  // 根据设置启用/禁用自动增益
+  audioEnhancer.enableAutoGain = speechSettings.value.enableAutoGain
+  
+  // 根据设置启用/禁用噪声抑制
+  audioEnhancer.enableNoiseSuppression = speechSettings.value.enableNoiseSuppression
+  
+  // 🎯 音频增强处理器
+  const audioEnhancerProcessor = {
     start() {
       // 不再需要直接连接到destination，因为我们已经有了完整的处理链
       scriptProcessor.connect(context.destination)
@@ -703,6 +801,8 @@ const createPCMRecorder = (stream: MediaStream) => {
       return createWAVBlob(completeAudioBuffer, outputSampleRate)
     }
   }
+  
+  return audioEnhancerProcessor
 }
 
 // 新增：创建WAV格式音频文件
@@ -962,7 +1062,7 @@ const startRecording = async () => {
       isRecording.value = true
       
       // 创建PCM录音器
-      recorder = createPCMRecorder(stream)
+      recorder = createAudioProcessor(stream)
       recorder.start()
       
       // 定时发送音频数据

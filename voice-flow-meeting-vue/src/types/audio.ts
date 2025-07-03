@@ -113,6 +113,21 @@ export interface RecognitionSettings {
   pause_threshold_ms: number
 }
 
+// 音频设置接口
+export interface AudioSettings {
+  defaultLanguage: string
+  enableVAD: boolean
+  vadThreshold: number
+  enableNoiseSuppression: boolean
+  enableEchoCancellation: boolean
+  sampleRate: number
+  enableRealTimeTranscription: boolean
+  maxSpeechLength: number
+  enableAudioEnhancement: boolean
+  enhancementLevel: 'light' | 'medium' | 'strong'
+  enableAutoGain: boolean
+}
+
 // 环境配置接口
 export interface EnvironmentConfig {
   host: string

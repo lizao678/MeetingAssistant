@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import type { AudioSettings } from '@/types/audio'
 
 export interface UserSettings {
   // 语音识别设置
@@ -102,6 +103,21 @@ export const useSettingsStore = defineStore('settings', () => {
     { code: 'es-ES', name: 'Español' },
     { code: 'fr-FR', name: 'Français' },
   ])
+  
+  // 音频设置
+  const speechSettings = ref<AudioSettings>({
+    defaultLanguage: 'zh',
+    enableVAD: true,
+    vadThreshold: 0.5,
+    enableNoiseSuppression: true,
+    enableEchoCancellation: true,
+    sampleRate: 16000,
+    enableRealTimeTranscription: true,
+    maxSpeechLength: 60,
+    enableAudioEnhancement: true,
+    enhancementLevel: 'medium',
+    enableAutoGain: true
+  })
   
   // 操作方法
   const updateSetting = <K extends keyof UserSettings>(
@@ -311,6 +327,7 @@ export const useSettingsStore = defineStore('settings', () => {
     hasUnsavedChanges,
     supportedLanguages,
     defaultSettings,
+    speechSettings,
     
     // 方法
     updateSetting,

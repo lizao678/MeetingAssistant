@@ -70,6 +70,32 @@
 
               <h3>音频处理</h3>
               <el-form :model="speechSettings" label-width="140px">
+                <el-form-item label="音频增强">
+                  <el-switch v-model="speechSettings.enableAudioEnhancement" />
+                  <div class="setting-tip">提升音频质量，降低噪声（如遇问题可关闭）</div>
+                </el-form-item>
+
+                <template v-if="speechSettings.enableAudioEnhancement">
+                  <el-form-item label="增强强度">
+                    <el-select v-model="speechSettings.enhancementLevel" style="width: 200px">
+                      <el-option label="轻度" value="light" />
+                      <el-option label="中等" value="medium" />
+                      <el-option label="强" value="strong" />
+                    </el-select>
+                    <div class="setting-tip">选择合适的增强强度</div>
+                  </el-form-item>
+
+                  <el-form-item label="噪声抑制">
+                    <el-switch v-model="speechSettings.enableNoiseSuppression" />
+                    <div class="setting-tip">降低背景噪声</div>
+                  </el-form-item>
+
+                  <el-form-item label="音量自动调节">
+                    <el-switch v-model="speechSettings.enableAutoGain" />
+                    <div class="setting-tip">自动平衡音量大小</div>
+                  </el-form-item>
+                </template>
+
                 <el-form-item label="语音活动检测">
                   <el-switch v-model="speechSettings.enableVAD" />
                   <div class="setting-tip">自动检测语音开始和结束</div>
@@ -83,11 +109,6 @@
                     :step="0.1"
                     style="width: 200px"
                   />
-                </el-form-item>
-
-                <el-form-item label="噪声抑制">
-                  <el-switch v-model="speechSettings.enableNoiseSuppression" />
-                  <div class="setting-tip">降低背景噪声对识别的影响</div>
                 </el-form-item>
 
                 <el-form-item label="回声消除">
@@ -379,19 +400,20 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Microphone } from '@element-plus/icons-vue'
+import type { AudioSettings } from '@/types/audio'
+import { useSettingsStore } from '@/stores/settingsStore'
+import { storeToRefs } from 'pinia'
 
-// 语音识别设置
-const speechSettings = reactive({
-  defaultLanguage: 'zh',
-  enableVAD: true,
-  vadThreshold: 0.5,
-  enableNoiseSuppression: true,
-  enableEchoCancellation: true,
-  sampleRate: 16000,
-  enableRealTimeTranscription: true,
-  maxSpeechLength: 60
+// 获取设置store
+const settingsStore = useSettingsStore()
+const { settings: storeSettings, speechSettings: storeSpeechSettings } = storeToRefs(settingsStore)
+
+// 本地设置状态
+const speechSettings = ref<AudioSettings>({
+  ...storeSpeechSettings.value
 })
 
 // 说话人识别设置
@@ -415,7 +437,7 @@ const summarySettings = reactive({
 // 存储和导出设置
 const storageSettings = reactive({
   autoSave: true,
-  saveInterval: 30, // 秒
+  saveInterval: 30,
   maxStorageDays: 30,
   defaultExportFormat: 'docx',
   enableCloudSync: false,
@@ -424,8 +446,8 @@ const storageSettings = reactive({
 
 // 界面设置
 const uiSettings = reactive({
-  theme: 'light',
-  fontSize: 'medium',
+  theme: 'light' as 'light' | 'dark' | 'auto',
+  fontSize: 'medium' as 'small' | 'medium' | 'large',
   enableAnimations: true,
   showConfidenceScore: true,
   enableNotifications: true,
@@ -437,9 +459,45 @@ const advancedSettings = reactive({
   enableDebugMode: false,
   logLevel: 'info',
   enableCaching: true,
-  cacheSize: 100, // MB
+  cacheSize: 100,
   enableGPUAcceleration: false,
   maxConcurrentTasks: 2
+})
+
+// 从store加载设置
+const loadSettingsFromStore = () => {
+  // 1. 加载音频设置
+  speechSettings.value = { ...storeSpeechSettings.value }
+  
+  // 2. 加载其他设置
+  const storeSettingsValue = storeSettings.value
+  
+  // 更新说话人识别设置
+  speakerSettings.enableSpeakerDiarization = storeSettingsValue.enableSpeakerRecognition
+  
+  // 更新界面设置
+  uiSettings.theme = storeSettingsValue.theme
+  uiSettings.fontSize = storeSettingsValue.fontSize
+  uiSettings.enableNotifications = storeSettingsValue.enableNotifications
+  
+  // 更新存储设置
+  storageSettings.autoSave = storeSettingsValue.autoSave
+  storageSettings.enableCloudSync = storeSettingsValue.saveLocation === 'cloud'
+  
+  // 更新智能总结设置
+  summarySettings.enableAutoSummary = storeSettingsValue.autoGenerateSummary
+  summarySettings.includeKeywords = storeSettingsValue.autoExtractKeywords
+  summarySettings.includeSentiment = storeSettingsValue.enableSentimentAnalysis
+  summarySettings.summaryLanguage = storeSettingsValue.summaryLanguage
+  
+  // 更新高级设置
+  advancedSettings.cacheSize = storeSettingsValue.maxLocalStorage
+}
+
+// 组件加载时初始化设置
+onMounted(() => {
+  // 从store加载设置
+  loadSettingsFromStore()
 })
 
 // 支持的语言选项
@@ -503,8 +561,60 @@ const activeTab = ref('speech')
 
 // 保存设置
 const saveSettings = () => {
-  // 这里实际应该调用API保存设置
-  ElMessage.success('设置已保存')
+  try {
+    // 1. 更新音频设置
+    storeSpeechSettings.value = { ...speechSettings.value }
+    
+    // 2. 更新其他设置
+    settingsStore.updateSettings({
+      // 语音识别设置
+      defaultLanguage: speechSettings.value.defaultLanguage,
+      enableSpeakerRecognition: speakerSettings.enableSpeakerDiarization,
+      enableSmartBreaks: true,
+      enablePunctuation: true,
+      
+      // 显示设置
+      theme: uiSettings.theme as 'light' | 'dark' | 'auto',
+      fontSize: uiSettings.fontSize as 'small' | 'medium' | 'large',
+      messageDisplayMode: 'bubble',
+      showTimestamps: true,
+      
+      // 音频设置
+      audioDevice: '',
+      enableNoiseReduction: speechSettings.value.enableNoiseSuppression,
+      enableEchoCancellation: speechSettings.value.enableEchoCancellation,
+      audioQuality: 'medium',
+      
+      // 存储设置
+      autoSave: storageSettings.autoSave,
+      saveLocation: storageSettings.enableCloudSync ? 'cloud' : 'local',
+      maxLocalStorage: advancedSettings.cacheSize,
+      
+      // 通知设置
+      enableNotifications: uiSettings.enableNotifications,
+      notificationSound: false,
+      errorNotifications: true,
+      
+      // AI功能设置
+      autoGenerateSummary: summarySettings.enableAutoSummary,
+      autoExtractKeywords: summarySettings.includeKeywords,
+      enableSentimentAnalysis: summarySettings.includeSentiment,
+      summaryLanguage: summarySettings.summaryLanguage,
+      
+      // 隐私设置
+      enableLocalProcessing: false,
+      shareAnalyticsData: false,
+      retainAudioData: true
+    })
+
+    // 3. 保存到本地存储
+    settingsStore.saveSettings()
+
+    ElMessage.success('设置已保存')
+  } catch (error) {
+    console.error('保存设置失败:', error)
+    ElMessage.error('保存设置失败，请重试')
+  }
 }
 
 // 重置设置
@@ -514,7 +624,10 @@ const resetSettings = () => {
     cancelButtonText: '取消',
     type: 'warning'
   }).then(() => {
-    // 重置所有设置到默认值
+    // 重置store中的设置
+    settingsStore.resetToDefaults()
+    // 重新加载设置到本地状态
+    loadSettingsFromStore()
     ElMessage.success('设置已重置')
   }).catch(() => {
     // 用户取消
@@ -524,7 +637,7 @@ const resetSettings = () => {
 // 导出设置
 const exportSettings = () => {
   const settings = {
-    speech: speechSettings,
+    speech: speechSettings.value,
     speaker: speakerSettings,
     summary: summarySettings,
     storage: storageSettings,
