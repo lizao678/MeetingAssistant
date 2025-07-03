@@ -1,0 +1,19 @@
+2025-07-03 14:19:25.845 | INFO     | __main__:<module>:160 - 开始数据库迁移...
+2025-07-03 14:19:25.852 | INFO     | __main__:migrate_speaker_tables:38 - ✅ 创建 frequent_speakers 表
+2025-07-03 14:19:25.858 | INFO     | __main__:migrate_speaker_tables:60 - ✅ 创建 speaker_settings_log 表
+2025-07-03 14:19:25.881 | INFO     | __main__:migrate_speaker_tables:75 - ✅ 创建数据库索引
+2025-07-03 14:19:25.882 | INFO     | __main__:migrate_speaker_tables:96 - ✅ 插入示例常用发言人数据
+2025-07-03 14:19:25.882 | INFO     | __main__:migrate_speaker_tables:103 - frequent_speakers 表字段: ['id', 'name', 'color', 'use_count', 'created_at', 'last_used_at', 'user_id']
+2025-07-03 14:19:25.882 | INFO     | __main__:migrate_speaker_tables:107 - speaker_settings_log 表字段: ['id', 'recording_id', 'speaker_id', 'old_name', 'new_name', 'setting_type', 'frequent_speaker_id', 'user_id', 'created_at']
+2025-07-03 14:19:25.882 | INFO     | __main__:migrate_speaker_tables:112 - 常用发言人总数: 6
+2025-07-03 14:19:25.883 | INFO     | __main__:migrate_speaker_tables:116 - 发言人设置日志总数: 0
+2025-07-03 14:19:25.889 | SUCCESS  | __main__:migrate_speaker_tables:121 - 🎉 数据库迁移完成!
+2025-07-03 14:19:25.889 | INFO     | __main__:<module>:164 - 数据库迁移成功，开始测试...
+2025-07-03 14:19:26.084 | INFO     | database:__init__:136 - 数据库初始化完成: recordings.db
+2025-07-03 14:19:26.085 | INFO     | __main__:test_speaker_apis:133 - 开始测试发言人API...
+2025-07-03 14:19:26.093 | INFO     | __main__:test_speaker_apis:137 - 获取常用发言人: 6 个
+2025-07-03 14:19:26.103 | INFO     | database:add_frequent_speaker:500 - 添加常用发言人: 测试发言人
+2025-07-03 14:19:26.105 | INFO     | __main__:test_speaker_apis:142 - 添加测试发言人成功: {'id': 7, 'name': '测试发言人', 'color': '#ff0000', 'useCount': 0, 'createdAt': '2025-07-03T06:19:26.095852', 'lastUsedAt': '2025-07-03T06:19:26.095852'}
+2025-07-03 14:19:26.114 | INFO     | database:delete_frequent_speaker:553 - 删除常用发言人: 7
+2025-07-03 14:19:26.115 | INFO     | __main__:test_speaker_apis:147 - 删除测试发言人成功
+2025-07-03 14:19:26.115 | SUCCESS  | __main__:test_speaker_apis:149 - ✅ 发言人API测试完成

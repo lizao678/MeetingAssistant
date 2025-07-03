@@ -72,6 +72,25 @@ class RegenerateSummaryRequest(BaseModel):
     summary_type: str = "meeting"
 
 
+class FrequentSpeakerRequest(BaseModel):
+    """常用发言人请求模型"""
+    name: str
+    color: str = "#409eff"
+
+
+class UpdateFrequentSpeakerRequest(BaseModel):
+    """更新常用发言人请求模型"""
+    name: Optional[str] = None
+    color: Optional[str] = None
+
+
+class UpdateSpeakerRequest(BaseModel):
+    """更新发言人请求模型"""
+    new_name: str
+    setting_type: str = "single"  # single, global
+    frequent_speaker_id: Optional[int] = None
+
+
 # 创建FastAPI应用
 app = FastAPI(
     title="SenseVoice实时语音识别服务",
@@ -417,6 +436,155 @@ async def delete_recording(recording_id: str):
     except Exception as e:
         logger.error(f"删除录音失败: {str(e)}")
         raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")
+
+
+# ===== 发言人管理API =====
+
+@app.get("/api/speakers/frequent")
+async def get_frequent_speakers():
+    """获取常用发言人列表"""
+    try:
+        speakers = db_manager.get_frequent_speakers()
+        return {
+            "success": True,
+            "data": speakers,
+            "total": len(speakers)
+        }
+    except Exception as e:
+        logger.error(f"获取常用发言人失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取失败: {str(e)}")
+
+
+@app.post("/api/speakers/frequent")
+async def add_frequent_speaker(request: FrequentSpeakerRequest):
+    """添加常用发言人"""
+    try:
+        speaker = db_manager.add_frequent_speaker(
+            name=request.name,
+            color=request.color
+        )
+        
+        if speaker is None:
+            raise HTTPException(status_code=400, detail="发言人名称已存在")
+        
+        return {
+            "success": True,
+            "data": speaker,
+            "message": "添加成功"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"添加常用发言人失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"添加失败: {str(e)}")
+
+
+@app.put("/api/speakers/frequent/{speaker_id}")
+async def update_frequent_speaker(speaker_id: int, request: UpdateFrequentSpeakerRequest):
+    """更新常用发言人"""
+    try:
+        success = db_manager.update_frequent_speaker(
+            speaker_id=speaker_id,
+            name=request.name,
+            color=request.color
+        )
+        
+        if not success:
+            raise HTTPException(status_code=404, detail="发言人不存在")
+        
+        return {
+            "success": True,
+            "message": "更新成功"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"更新常用发言人失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"更新失败: {str(e)}")
+
+
+@app.delete("/api/speakers/frequent/{speaker_id}")
+async def delete_frequent_speaker(speaker_id: int):
+    """删除常用发言人"""
+    try:
+        success = db_manager.delete_frequent_speaker(speaker_id)
+        
+        if not success:
+            raise HTTPException(status_code=404, detail="发言人不存在")
+        
+        return {
+            "success": True,
+            "message": "删除成功"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"删除常用发言人失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")
+
+
+@app.post("/api/recordings/{recording_id}/speakers/{speaker_id}/update")
+async def update_speaker_in_recording(recording_id: str, speaker_id: str, request: UpdateSpeakerRequest):
+    """更新录音中的发言人信息"""
+    try:
+        # 验证录音是否存在
+        recording = db_manager.get_recording(recording_id)
+        if not recording:
+            raise HTTPException(status_code=404, detail="录音不存在")
+        
+        # 验证设置类型
+        if request.setting_type not in ["single", "global"]:
+            raise HTTPException(status_code=400, detail="设置类型必须是 'single' 或 'global'")
+        
+        # 更新发言人信息
+        success = db_manager.update_speaker_in_recording(
+            recording_id=recording_id,
+            speaker_id=speaker_id,
+            new_name=request.new_name,
+            setting_type=request.setting_type,
+            frequent_speaker_id=request.frequent_speaker_id
+        )
+        
+        if not success:
+            raise HTTPException(status_code=400, detail="更新失败")
+        
+        return {
+            "success": True,
+            "message": "发言人信息更新成功"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"更新发言人信息失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"更新失败: {str(e)}")
+
+
+@app.get("/api/recordings/{recording_id}/speakers/settings-log")
+async def get_speaker_settings_log(recording_id: str):
+    """获取发言人设置日志"""
+    try:
+        # 验证录音是否存在
+        recording = db_manager.get_recording(recording_id)
+        if not recording:
+            raise HTTPException(status_code=404, detail="录音不存在")
+        
+        logs = db_manager.get_speaker_settings_log(recording_id)
+        
+        return {
+            "success": True,
+            "data": logs,
+            "total": len(logs)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取发言人设置日志失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取失败: {str(e)}")
 
 
 @app.websocket("/ws/transcribe")

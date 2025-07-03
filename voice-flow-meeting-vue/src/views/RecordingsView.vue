@@ -212,7 +212,7 @@ const fetchRecordings = async () => {
     }
     
     const response = await recordingService.getRecordings(params)
-    
+
     // 转换API数据格式为组件需要的格式
     recordings.value = response.data.recordings.map(convertRecordingFormat)
     totalCount.value = response.data.total
@@ -523,9 +523,9 @@ const handleBatchCleanup = async () => {
       } catch (error) {
         console.error(`删除录音 ${recording.id} 失败:`, error)
         failCount++
-      }
-    }
-    
+  }
+}
+
     loadingInstance.close()
     
     if (failCount === 0) {
@@ -672,7 +672,7 @@ onMounted(() => {
   .header-actions {
     justify-content: center;
   }
-  
+
   .recordings-grid {
     grid-template-columns: 1fr;
     gap: 16px;
@@ -687,17 +687,17 @@ onMounted(() => {
   .page-header {
     padding: 16px 0;
   }
-  
+
   .header-content,
   .filter-container,
   .recordings-container {
     padding: 0 16px;
   }
-  
+
   .page-title {
     font-size: 24px;
   }
-  
+
   .header-actions {
     flex-direction: column;
   }

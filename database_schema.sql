@@ -80,7 +80,47 @@ CREATE INDEX idx_speech_segments_speaker_id ON speech_segments(speaker_id);
 CREATE INDEX idx_speech_segments_time ON speech_segments(start_time, end_time);
 CREATE INDEX idx_speakers_recording_id ON speakers(recording_id);
 
--- 插入示例数据
+-- 常用发言人表
+CREATE TABLE frequent_speakers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name VARCHAR(100) NOT NULL UNIQUE,
+    color VARCHAR(20) NOT NULL DEFAULT '#409eff',
+    use_count INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    user_id VARCHAR(100) DEFAULT 'default_user'
+);
+
+-- 发言人设置日志表
+CREATE TABLE speaker_settings_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    recording_id INTEGER NOT NULL,
+    speaker_id INTEGER NOT NULL,
+    old_name VARCHAR(100),
+    new_name VARCHAR(100) NOT NULL,
+    setting_type VARCHAR(20) NOT NULL, -- 'single' or 'global'
+    frequent_speaker_id INTEGER, -- 关联的常用发言人ID
+    user_id VARCHAR(100) DEFAULT 'default_user',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (recording_id) REFERENCES recordings(id) ON DELETE CASCADE,
+    FOREIGN KEY (speaker_id) REFERENCES speakers(id) ON DELETE CASCADE,
+    FOREIGN KEY (frequent_speaker_id) REFERENCES frequent_speakers(id) ON DELETE SET NULL
+);
+
+-- 创建新的索引
+CREATE INDEX idx_frequent_speakers_user_id ON frequent_speakers(user_id);
+CREATE INDEX idx_frequent_speakers_use_count ON frequent_speakers(use_count DESC);
+CREATE INDEX idx_speaker_settings_log_recording_id ON speaker_settings_log(recording_id);
+CREATE INDEX idx_speaker_settings_log_speaker_id ON speaker_settings_log(speaker_id);
+
+-- 插入示例常用发言人数据
+INSERT INTO frequent_speakers (name, color, use_count, last_used_at) VALUES
+('主持人', '#ff6b6b', 15, CURRENT_TIMESTAMP),
+('雷军', '#4ecdc4', 8, CURRENT_TIMESTAMP),
+('张三', '#45b7d1', 5, CURRENT_TIMESTAMP),
+('李四', '#f9ca24', 3, CURRENT_TIMESTAMP);
+
+-- 插入示例录音数据
 INSERT INTO recordings (title, file_path, file_size, duration, format) VALUES
 ('产品讨论会议', '/uploads/recordings/20250630_meeting_001.webm', 5242880, 1800000, 'webm'),
 ('团队周例会', '/uploads/recordings/20250630_meeting_002.webm', 3145728, 1200000, 'webm'); 

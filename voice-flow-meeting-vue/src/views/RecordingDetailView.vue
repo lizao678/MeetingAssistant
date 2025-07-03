@@ -277,10 +277,14 @@
                     <el-avatar 
                       :size="32" 
                       :style="{ backgroundColor: segment.speakerColor }"
+                      class="speaker-avatar"
+                      @click.stop="openSpeakerSetting(segment)"
                     >
-                      {{ segment.speakerNumber }}
+                      {{ getSpeakerAvatarText(segment) }}
                     </el-avatar>
-                    <span class="speaker-name">{{ segment.speakerName }}</span>
+                    <span class="speaker-name" @click.stop="openSpeakerSetting(segment)">
+                      {{ segment.speakerName }}
+                    </span>
                   </div>
                   <div class="segment-time">
                     {{ formatTime(segment.startTime) }} - {{ formatTime(segment.endTime) }}
@@ -344,6 +348,15 @@
         <span>正在加载音频播放器...</span>
       </div>
     </div>
+
+    <!-- 发言人设置对话框 -->
+    <SpeakerSettingDialog
+      v-model="showSpeakerSetting"
+      :current-speakers="currentSpeakers"
+      :recording-id="recordingId"
+      :selected-segment="selectedSegment"
+      @speaker-updated="handleSpeakerUpdated"
+    />
   </div>
 </template>
 
@@ -356,9 +369,14 @@ import recordingService from '@/services/recordingService'
 import http from '@/services/http'
 import type { RecordingDetail, SpeechSegment, IntelligentSummary, Keyword } from '@/services/recordingService'
 import AudioPlayer from '@/components/AudioPlayer.vue'
+import SpeakerSettingDialog from '@/components/SpeakerSettingDialog.vue'
+import { useSpeakerStore, type Speaker } from '@/stores/speakerStore'
 
 const route = useRoute()
 const router = useRouter()
+
+// 使用speakerStore
+const speakerStore = useSpeakerStore()
 
 // 录音详情数据
 const recordingDetail = ref({
@@ -432,6 +450,27 @@ const consecutiveFailures = ref(0)
 const maxConsecutiveFailures = ref(5) // 最大连续失败次数
 const pollingStartTime = ref(0)
 const maxPollingDuration = ref(5 * 60 * 1000) // 最大轮询时长：5分钟
+
+// 发言人设置相关状态
+const showSpeakerSetting = ref(false)
+const selectedSegment = ref<{
+  id: string
+  speakerName: string
+  speakerNumber: string
+  speakerColor: string
+  speakerId: string
+} | undefined>(undefined)
+
+// 当前录音的发言人列表
+const currentSpeakers = ref<Array<{
+  id: string
+  name: string
+  color: string
+  number?: string
+  segmentCount?: number
+}>>([])
+
+// 使用store的常用发言人方法
 
 // 过滤后的段落
 const filteredSegments = computed(() => {
@@ -581,6 +620,69 @@ const shareRecording = () => {
   // TODO: 实现分享功能
 }
 
+// 发言人设置相关方法
+const openSpeakerSetting = (segment: any) => {
+  selectedSegment.value = {
+    id: segment.id,
+    speakerName: segment.speakerName,
+    speakerNumber: segment.speakerNumber,
+    speakerColor: segment.speakerColor,
+    speakerId: segment.speakerId || segment.speakerNumber || 'speaker1'
+  }
+  showSpeakerSetting.value = true
+}
+
+// 发言人更新成功后的处理
+const handleSpeakerUpdated = async () => {
+  try {
+    // 重新加载录音详情以获取最新的发言人信息
+    await loadRecordingDetail()
+    ElMessage.success('发言人信息已更新')
+  } catch (error) {
+    console.error('重新加载数据失败:', error)
+    ElMessage.error('更新成功，但刷新数据失败，请手动刷新页面')
+  }
+}
+
+// 生成当前录音的发言人列表
+const generateCurrentSpeakers = () => {
+  const speakerMap = new Map<string, any>()
+  
+  segments.value.forEach(segment => {
+    const speakerNumber = segment.speakerNumber
+    if (!speakerMap.has(speakerNumber)) {
+      speakerMap.set(speakerNumber, {
+        id: `current-${speakerNumber}`,
+        name: segment.speakerName,
+        color: segment.speakerColor,
+        number: speakerNumber,
+        segmentCount: 0
+      })
+    }
+    
+    const speaker = speakerMap.get(speakerNumber)!
+    speaker.segmentCount = (speaker.segmentCount || 0) + 1
+  })
+  
+  currentSpeakers.value = Array.from(speakerMap.values())
+}
+
+// 获取发言人头像显示文本
+const getSpeakerAvatarText = (segment: any) => {
+  const name = segment.speakerName || ''
+  
+  // 检查是否是默认格式的姓名（如"发言人1"、"发言人2"等）
+  const isDefaultName = /^发言人\s*\d+$/.test(name.trim())
+  
+  // 如果是默认姓名或者姓名为空，显示数字
+  if (!name.trim() || isDefaultName) {
+    return segment.speakerNumber || '1'
+  }
+  
+  // 否则显示姓名的第一个字符
+  return name.charAt(0)
+}
+
 // 离线重处理功能
 const startOfflineReprocess = async () => {
   try {
@@ -711,6 +813,9 @@ const loadRecordingDetail = async () => {
           highlightedText: ''
         }))
         transcriptLoading.value = false
+        
+        // 生成当前录音的发言人列表
+        generateCurrentSpeakers()
       } else {
         transcriptLoading.value = true
       }
@@ -850,6 +955,7 @@ const loadDemoData = () => {
   ]
   
   generateChapters()
+  generateCurrentSpeakers()
   transcriptLoading.value = false
   ElMessage.success('演示数据加载完成')
 }
@@ -938,6 +1044,7 @@ const startProcessingPolling = () => {
             highlightedText: ''
           }))
           transcriptLoading.value = false
+          generateCurrentSpeakers()
           ElMessage.success('转写内容加载完成')
         }
         
@@ -1319,12 +1426,27 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+  
+  .speaker-avatar {
+    cursor: pointer;
+    transition: transform 0.2s;
+    
+    &:hover {
+      transform: scale(1.05);
+    }
+  }
 }
 
 .speaker-name {
   font-weight: 600;
   color: #303133;
   font-size: 14px;
+  cursor: pointer;
+  transition: color 0.2s;
+  
+  &:hover {
+    color: #409eff;
+  }
 }
 
 .segment-time {

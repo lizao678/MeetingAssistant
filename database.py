@@ -91,6 +91,38 @@ class Keyword(Base):
     recording = relationship("Recording", back_populates="keywords")
 
 
+class FrequentSpeaker(Base):
+    """常用发言人表"""
+    __tablename__ = "frequent_speakers"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False, unique=True)
+    color = Column(String(20), nullable=False, default='#409eff')
+    use_count = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    last_used_at = Column(DateTime, default=datetime.utcnow)
+    user_id = Column(String(100), default='default_user')
+
+
+class SpeakerSettingsLog(Base):
+    """发言人设置日志表"""
+    __tablename__ = "speaker_settings_log"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    recording_id = Column(String, ForeignKey("recordings.id"), nullable=False)
+    speaker_id = Column(String(50), nullable=False)
+    old_name = Column(String(100))
+    new_name = Column(String(100), nullable=False)
+    setting_type = Column(String(20), nullable=False)  # 'single' or 'global'
+    frequent_speaker_id = Column(Integer, ForeignKey("frequent_speakers.id"), nullable=True)
+    user_id = Column(String(100), default='default_user')
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # 关联关系
+    recording = relationship("Recording")
+    frequent_speaker = relationship("FrequentSpeaker")
+
+
 class DatabaseManager:
     """数据库管理器"""
     
@@ -417,6 +449,208 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"获取录音列表失败: {str(e)}")
             return {"recordings": [], "total": 0, "page": 1, "page_size": page_size, "total_pages": 0}
+
+    # ===== 常用发言人管理 =====
+    
+    def get_frequent_speakers(self, user_id: str = "default_user") -> List[Dict[str, Any]]:
+        """获取常用发言人列表"""
+        try:
+            with self.get_session() as session:
+                speakers = session.query(FrequentSpeaker).filter(
+                    FrequentSpeaker.user_id == user_id
+                ).order_by(FrequentSpeaker.use_count.desc()).all()
+                
+                return [
+                    {
+                        "id": speaker.id,
+                        "name": speaker.name,
+                        "color": speaker.color,
+                        "useCount": speaker.use_count,
+                        "createdAt": speaker.created_at.isoformat() if speaker.created_at else None,
+                        "lastUsedAt": speaker.last_used_at.isoformat() if speaker.last_used_at else None
+                    }
+                    for speaker in speakers
+                ]
+                
+        except Exception as e:
+            logger.error(f"获取常用发言人失败: {str(e)}")
+            return []
+    
+    def add_frequent_speaker(self, name: str, color: str = "#409eff", user_id: str = "default_user") -> Optional[Dict[str, Any]]:
+        """添加常用发言人"""
+        try:
+            with self.get_session() as session:
+                # 检查是否已存在
+                existing = session.query(FrequentSpeaker).filter(
+                    FrequentSpeaker.name == name,
+                    FrequentSpeaker.user_id == user_id
+                ).first()
+                
+                if existing:
+                    return None  # 已存在
+                
+                speaker = FrequentSpeaker(
+                    name=name,
+                    color=color,
+                    user_id=user_id
+                )
+                session.add(speaker)
+                session.commit()
+                
+                logger.info(f"添加常用发言人: {name}")
+                return {
+                    "id": speaker.id,
+                    "name": speaker.name,
+                    "color": speaker.color,
+                    "useCount": speaker.use_count,
+                    "createdAt": speaker.created_at.isoformat() if speaker.created_at else None,
+                    "lastUsedAt": speaker.last_used_at.isoformat() if speaker.last_used_at else None
+                }
+                
+        except Exception as e:
+            logger.error(f"添加常用发言人失败: {str(e)}")
+            return None
+    
+    def update_frequent_speaker(self, speaker_id: int, name: str = None, color: str = None, user_id: str = "default_user") -> bool:
+        """更新常用发言人"""
+        try:
+            with self.get_session() as session:
+                speaker = session.query(FrequentSpeaker).filter(
+                    FrequentSpeaker.id == speaker_id,
+                    FrequentSpeaker.user_id == user_id
+                ).first()
+                
+                if not speaker:
+                    return False
+                
+                if name is not None:
+                    speaker.name = name
+                if color is not None:
+                    speaker.color = color
+                
+                session.commit()
+                logger.info(f"更新常用发言人: {speaker_id}")
+                return True
+                
+        except Exception as e:
+            logger.error(f"更新常用发言人失败: {str(e)}")
+            return False
+    
+    def delete_frequent_speaker(self, speaker_id: int, user_id: str = "default_user") -> bool:
+        """删除常用发言人"""
+        try:
+            with self.get_session() as session:
+                speaker = session.query(FrequentSpeaker).filter(
+                    FrequentSpeaker.id == speaker_id,
+                    FrequentSpeaker.user_id == user_id
+                ).first()
+                
+                if not speaker:
+                    return False
+                
+                session.delete(speaker)
+                session.commit()
+                logger.info(f"删除常用发言人: {speaker_id}")
+                return True
+                
+        except Exception as e:
+            logger.error(f"删除常用发言人失败: {str(e)}")
+            return False
+    
+    def increment_speaker_use_count(self, speaker_id: int, user_id: str = "default_user") -> bool:
+        """增加发言人使用次数"""
+        try:
+            with self.get_session() as session:
+                speaker = session.query(FrequentSpeaker).filter(
+                    FrequentSpeaker.id == speaker_id,
+                    FrequentSpeaker.user_id == user_id
+                ).first()
+                
+                if not speaker:
+                    return False
+                
+                speaker.use_count += 1
+                speaker.last_used_at = datetime.utcnow()
+                session.commit()
+                return True
+                
+        except Exception as e:
+            logger.error(f"增加发言人使用次数失败: {str(e)}")
+            return False
+    
+    # ===== 发言人设置管理 =====
+    
+    def update_speaker_in_recording(self, recording_id: str, speaker_id: str, new_name: str, 
+                                   setting_type: str = "single", frequent_speaker_id: int = None, 
+                                   user_id: str = "default_user") -> bool:
+        """更新录音中的发言人信息"""
+        try:
+            with self.get_session() as session:
+                # 获取旧的发言人名称
+                old_segment = session.query(SpeechSegment).filter(
+                    SpeechSegment.recording_id == recording_id,
+                    SpeechSegment.speaker_id == speaker_id
+                ).first()
+                
+                old_name = old_segment.speaker_name if old_segment else None
+                
+                # 更新所有相关段落的发言人信息
+                segments = session.query(SpeechSegment).filter(
+                    SpeechSegment.recording_id == recording_id,
+                    SpeechSegment.speaker_id == speaker_id
+                ).all()
+                
+                for segment in segments:
+                    segment.speaker_name = new_name
+                
+                # 记录设置日志
+                log_entry = SpeakerSettingsLog(
+                    recording_id=recording_id,
+                    speaker_id=speaker_id,
+                    old_name=old_name,
+                    new_name=new_name,
+                    setting_type=setting_type,
+                    frequent_speaker_id=frequent_speaker_id,
+                    user_id=user_id
+                )
+                session.add(log_entry)
+                
+                # 如果是从常用发言人设置，增加使用次数
+                if frequent_speaker_id:
+                    self.increment_speaker_use_count(frequent_speaker_id, user_id)
+                
+                session.commit()
+                logger.info(f"更新录音 {recording_id} 中发言人 {speaker_id} 的名称为: {new_name}")
+                return True
+                
+        except Exception as e:
+            logger.error(f"更新发言人信息失败: {str(e)}")
+            return False
+    
+    def get_speaker_settings_log(self, recording_id: str) -> List[Dict[str, Any]]:
+        """获取发言人设置日志"""
+        try:
+            with self.get_session() as session:
+                logs = session.query(SpeakerSettingsLog).filter(
+                    SpeakerSettingsLog.recording_id == recording_id
+                ).order_by(SpeakerSettingsLog.created_at.desc()).all()
+                
+                return [
+                    {
+                        "id": log.id,
+                        "speakerId": log.speaker_id,
+                        "oldName": log.old_name,
+                        "newName": log.new_name,
+                        "settingType": log.setting_type,
+                        "frequentSpeakerId": log.frequent_speaker_id,
+                        "createdAt": log.created_at.isoformat() if log.created_at else None
+                    }
+                    for log in logs
+                ]
+                
+        except Exception as e:
+            logger.error(f"获取发言人设置日志失败: {str(e)}")
+            return []
 
 
 # 全局数据库管理器实例
