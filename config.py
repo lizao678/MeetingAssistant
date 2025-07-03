@@ -63,18 +63,18 @@ class AudioProcessingConfig:
     # VAD模拟处理配置
     CHUNK_DURATION = 3.0  # 基础chunk时长（秒）
     OVERLAP_DURATION = 0.5  # 重叠时长（秒）
-    MIN_CHUNK_DURATION = 0.5  # 最小chunk时长（秒）
+    MIN_CHUNK_DURATION = 0.3  # 最小chunk时长（秒）
     
     # 细分处理配置
     MAX_SIMPLE_CHUNK_DURATION = 5.0  # 简单处理的最大时长（秒）
     MAX_SUB_DURATION = 4.0  # 细分时每个子段的最大时长（秒）
-    MIN_PART_DURATION = 0.8  # 分割后最小部分时长（秒）
+    MIN_PART_DURATION = 0.5  # 分割后最小部分时长（秒）
     
-    # 音频质量检测
-    MIN_ENERGY_THRESHOLD = 0.0001  # 最低能量阈值（降低以接受更多语音）
-    MAX_ENERGY_THRESHOLD = 0.1  # 最高能量阈值
-    SNR_THRESHOLD = 5.0  # 信噪比阈值（dB）（降低要求）
-    ZERO_CROSSING_THRESHOLD = 0.30  # 零穿越率阈值（提高到0.30，允许更多语音通过）
+    # 音频质量检测 - 降低所有阈值
+    MIN_ENERGY_THRESHOLD = 0.00001  # 最低能量阈值（大幅降低）
+    MAX_ENERGY_THRESHOLD = 1.0  # 最高能量阈值（提高上限）
+    SNR_THRESHOLD = 0.0  # 信噪比阈值（dB）（关闭检查）
+    ZERO_CROSSING_THRESHOLD = 1.0  # 零穿越率阈值（关闭检查）
     
     # 采样率配置
     TARGET_SAMPLE_RATE = 16000  # 目标采样率

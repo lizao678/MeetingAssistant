@@ -748,50 +748,18 @@ class RecordingProcessor:
             logger.debug(f"音频时长太短({duration:.2f}s)，跳过")
             return False
         
-        # 2. 检查音频能量（避免静音）
+        # 2. 检查音频能量（避免完全静音）
         audio_energy = np.mean(np.abs(chunk))
-        if audio_energy < audio_config.MIN_ENERGY_THRESHOLD:
+        if audio_energy < 0.00001:  # 降低能量阈值
             logger.debug(f"音频能量太低({audio_energy:.6f})，跳过")
             return False
         
-        # 3. 检查音频动态范围
+        # 3. 检查音频动态范围（只检查是否完全静音）
         audio_std = np.std(chunk)
-        if audio_std < audio_config.MIN_ENERGY_THRESHOLD:  # 避免单调音频
+        if audio_std < 0.000001:  # 降低方差阈值
             logger.debug(f"音频动态范围太小({audio_std:.6f})，跳过")
             return False
         
-        # 4. 检查音频峰值（避免削波或异常信号）
-        max_amplitude = np.max(np.abs(chunk))
-        if max_amplitude > 0.99:  # 可能削波
-            logger.debug(f"音频可能削波(峰值:{max_amplitude:.3f})，跳过")
-            return False
-        
-        # 5. 检查零交叉率（避免纯噪音）
-        zero_crossings = np.sum(np.diff(np.signbit(chunk)))
-        zcr = zero_crossings / len(chunk)
-        if zcr > audio_config.ZERO_CROSSING_THRESHOLD:  # 零交叉率过高可能是噪音
-            logger.debug(f"零交叉率过高({zcr:.3f})，阈值({audio_config.ZERO_CROSSING_THRESHOLD})，可能是噪音，跳过")
-            return False
-        
-        # 6. 检查频谱质量（简单检查）
-        # 计算频谱能量分布
-        fft = np.fft.fft(chunk)
-        magnitude = np.abs(fft)
-        total_energy = np.sum(magnitude)
-        
-        if total_energy == 0:
-            logger.debug("频谱能量为零，跳过")
-            return False
-        
-        # 检查低频能量占比（人声主要在低中频）
-        low_freq_energy = np.sum(magnitude[:len(magnitude)//4])
-        low_freq_ratio = low_freq_energy / total_energy
-        
-        if low_freq_ratio < 0.1:  # 低频能量太少，可能不是语音
-            logger.debug(f"低频能量比例太小({low_freq_ratio:.3f})，可能不是语音，跳过")
-            return False
-        
-        # logger.debug(f"音频质量检查通过 - 时长:{duration:.2f}s, 能量:{audio_energy:.6f}, 动态范围:{audio_std:.6f}")  # 减少日志输出
         return True
     
     def _merge_speaker_segments(self, segments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

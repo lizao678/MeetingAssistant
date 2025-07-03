@@ -467,132 +467,11 @@ const createAudioProcessor = (stream: MediaStream) => {
   const context = new AudioContext()
   const audioInput = context.createMediaStreamSource(stream)
   
-  // 🎯 创建完整的音频处理链
-  
-  // 1. 高通滤波器 - 去除低频噪音（50Hz以下）
-  const highpassFilter = context.createBiquadFilter()
-  highpassFilter.type = 'highpass'
-  highpassFilter.frequency.setValueAtTime(50, context.currentTime) // 50Hz截止频率
-  highpassFilter.Q.setValueAtTime(0.7, context.currentTime)
-  
-  // 2. 压缩器 - 降低压缩比和增益
-  const compressor = context.createDynamicsCompressor()
-  compressor.threshold.setValueAtTime(-24, context.currentTime)  // 提高阈值
-  compressor.knee.setValueAtTime(30, context.currentTime)       // 更柔和的压缩过渡
-  compressor.ratio.setValueAtTime(3, context.currentTime)       // 降低压缩比
-  compressor.attack.setValueAtTime(0.05, context.currentTime)   // 更快的起音
-  compressor.release.setValueAtTime(0.25, context.currentTime)  // 更快的释放
-  
-  // 3. 增益节点 - 降低增益
-  const gainNode = context.createGain()
-  gainNode.gain.setValueAtTime(1.0, context.currentTime)        // 降低到1.0，不额外增益
-  
-  // 4. 低通滤波器 - 去除高频噪音（8kHz以上）
-  const lowpassFilter = context.createBiquadFilter()
-  lowpassFilter.type = 'lowpass'
-  lowpassFilter.frequency.setValueAtTime(8000, context.currentTime) // 8kHz截止
-  lowpassFilter.Q.setValueAtTime(0.7, context.currentTime)
-  
-  // 5. 最终处理节点
+  // 创建基础处理节点
   const scriptProcessor = context.createScriptProcessor(4096, channelCount, channelCount)
   
-  // 🔗 连接音频处理链：输入 → 高通 → 压缩 → 增益 → 低通 → 处理器
-  audioInput.connect(highpassFilter)
-  highpassFilter.connect(compressor)
-  compressor.connect(gainNode)
-  gainNode.connect(lowpassFilter)
-  lowpassFilter.connect(scriptProcessor)
-  
-  // 🎯 音频增强处理器
-  const audioEnhancer: AudioEnhancer = {
-    noiseFloor: -50,
-    silenceThreshold: 0.02,
-    rmsHistory: [],
-    maxRmsHistory: 100,
-    currentGain: 1.0,
-    targetGain: 1.0,
-    gainSmoothingFactor: 0.98,
-    targetRMS: 0.08,
-    maxGain: 2.0,
-    enableAutoGain: true,
-    enableNoiseSuppression: true,
-    analyzeAudio(buffer: Float32Array) {
-      // 计算RMS（均方根）
-      let sum = 0
-      let peak = 0
-      for (let i = 0; i < buffer.length; i++) {
-        const sample = buffer[i]
-        sum += sample * sample
-        peak = Math.max(peak, Math.abs(sample))
-      }
-      const rms = Math.sqrt(sum / buffer.length)
-      
-      // 更新RMS历史
-      this.rmsHistory.push(rms)
-      if (this.rmsHistory.length > this.maxRmsHistory) {
-        this.rmsHistory.shift()
-      }
-      
-      // 计算信噪比
-      const avgNoise = this.rmsHistory.slice(0, 20).reduce((a, b) => a + b, 0) / 20 || 0.001
-      const snr = rms > 0 ? 20 * Math.log10(rms / Math.max(avgNoise, 0.001)) : -60
-      
-      return { rms, peak, snr }
-    },
-    denoiseBuffer(buffer: Float32Array) {
-      const stats = this.analyzeAudio(buffer)
-      const enhanced = new Float32Array(buffer.length)
-      
-      // 自适应噪声门限
-      const adaptiveThreshold = Math.max(this.silenceThreshold, stats.rms * 0.1)
-      
-      for (let i = 0; i < buffer.length; i++) {
-        let sample = buffer[i]
-        const amplitude = Math.abs(sample)
-        
-        // 噪声门处理
-        if (amplitude < adaptiveThreshold) {
-          sample *= 0.1 // 大幅衰减噪声
-        } else {
-          // 光谱减法降噪 (简化版)
-          const noiseFactor = Math.max(0, 1 - (adaptiveThreshold / amplitude) * 0.5)
-          sample *= noiseFactor
-        }
-        
-        enhanced[i] = sample
-      }
-      
-      return enhanced
-    },
-    normalizeAudio(buffer: Float32Array) {
-      const stats = this.analyzeAudio(buffer)
-      
-      // 降低目标RMS电平和最大增益
-      const targetRMS = 0.08 // 降低目标RMS电平
-      if (stats.rms > 0.001) {
-        this.targetGain = Math.min(targetRMS / stats.rms, 2.0) // 最大2倍增益
-      }
-      
-      // 平滑增益变化，避免突变
-      this.currentGain = this.currentGain * this.gainSmoothingFactor + 
-                        this.targetGain * (1 - this.gainSmoothingFactor)
-      
-      // 应用增益和软限制
-      const normalized = new Float32Array(buffer.length)
-      for (let i = 0; i < buffer.length; i++) {
-        let sample = buffer[i] * this.currentGain
-        
-        // 软限制防止削波
-        if (Math.abs(sample) > 0.95) {
-          sample = Math.sign(sample) * (0.95 - (Math.abs(sample) - 0.95) * 0.1)
-        }
-        
-        normalized[i] = sample
-      }
-      
-      return normalized
-    }
-  }
+  // 直接连接到输出，跳过所有增强处理
+  audioInput.connect(scriptProcessor)
   
   const audioData = {
     size: 0,
@@ -602,21 +481,12 @@ const createAudioProcessor = (stream: MediaStream) => {
       this.size = 0
     },
     input(data: Float32Array) {
-      // 🚀 应用音频增强处理
-      let enhancedData = data
-      
-      // 1. 动态降噪
-      enhancedData = audioEnhancer.denoiseBuffer(enhancedData)
-      
-      // 2. 音频标准化和压缩
-      enhancedData = audioEnhancer.normalizeAudio(enhancedData)
-      
-      // 保存处理后的数据
-      this.buffer.push(new Float32Array(enhancedData))
-      this.size += enhancedData.length
+      // 直接保存原始数据，不做任何处理
+      this.buffer.push(new Float32Array(data))
+      this.size += data.length
       
       // 同时保存到完整缓冲区
-      completeAudioBuffer.push(new Float32Array(enhancedData))
+      completeAudioBuffer.push(new Float32Array(data))
     },
     encodePCM() {
       const bytes = new Float32Array(this.size)
@@ -675,119 +545,21 @@ const createAudioProcessor = (stream: MediaStream) => {
     audioData.input(resampledData)
   }
   
-  // 🎯 添加音频质量监控
-  let qualityStats = {
-    averageRMS: 0,
-    peakLevel: 0,
-    snr: 0,
-    processingGain: 1.0
-  }
+  // 连接到输出
+  scriptProcessor.connect(context.destination)
   
-  // 修改音频处理函数，添加质量监控
-  const originalOnaudioprocess = scriptProcessor.onaudioprocess
-  scriptProcessor.onaudioprocess = (e) => {
-    const inputData = e.inputBuffer.getChannelData(0)
-    
-    // 更新质量统计
-    qualityStats.averageRMS = audioEnhancer.rmsHistory.slice(-10).reduce((a, b) => a + b, 0) / 10 || 0
-    qualityStats.peakLevel = Math.max(...Array.from(inputData).map(Math.abs))
-    qualityStats.processingGain = audioEnhancer.currentGain
-    
-    // 降采样处理
-    const resampledData = downsampleBuffer(inputData, inputSampleRate, outputSampleRate)
-    audioData.input(resampledData)
-  }
-  
-  // 根据设置决定是否启用音频增强
-  if (!speechSettings.value.enableAudioEnhancement) {
-    // 直接连接到输出，跳过增强处理
-    audioInput.connect(scriptProcessor)
-    scriptProcessor.connect(context.destination)
-    return {
-      start() {},
-      stop() {
-        scriptProcessor.disconnect()
-        audioInput.disconnect()
-      },
-      getQualityStats() {
-        return {
-          averageRMS: 0,
-          peakLevel: 0,
-          snr: 0,
-          processingGain: 1.0
-        }
-      },
-      getBlob() {
-        return audioData.encodePCM()
-      },
-      clear() {
-        audioData.clear()
-      },
-      getCompleteAudioWAV() {
-        return createWAVBlob(completeAudioBuffer, outputSampleRate)
-      }
-    }
-  }
-
-  // 根据增强级别设置参数
-  const enhancementLevel = speechSettings.value.enhancementLevel
-  const params: Record<string, EnhancementParams> = {
-    light: {
-      compressorRatio: 2,
-      gain: 1.0,
-      targetRMS: 0.05,
-      maxGain: 1.5
-    },
-    medium: {
-      compressorRatio: 3,
-      gain: 1.0,
-      targetRMS: 0.08,
-      maxGain: 2.0
-    },
-    strong: {
-      compressorRatio: 4,
-      gain: 1.2,
-      targetRMS: 0.12,
-      maxGain: 2.5
-    }
-  }
-  
-  const currentParams = params[enhancementLevel]
-  
-  // 应用参数
-  compressor.ratio.setValueAtTime(currentParams.compressorRatio, context.currentTime)
-  gainNode.gain.setValueAtTime(currentParams.gain, context.currentTime)
-  
-  // 更新音频增强器参数
-  audioEnhancer.targetRMS = currentParams.targetRMS
-  audioEnhancer.maxGain = currentParams.maxGain
-  
-  // 根据设置启用/禁用自动增益
-  audioEnhancer.enableAutoGain = speechSettings.value.enableAutoGain
-  
-  // 根据设置启用/禁用噪声抑制
-  audioEnhancer.enableNoiseSuppression = speechSettings.value.enableNoiseSuppression
-  
-  // 🎯 音频增强处理器
-  const audioEnhancerProcessor = {
-    start() {
-      // 不再需要直接连接到destination，因为我们已经有了完整的处理链
-      scriptProcessor.connect(context.destination)
-    },
+  return {
+    start() {},
     stop() {
-      // 断开所有连接
       scriptProcessor.disconnect()
-      lowpassFilter.disconnect()
-      gainNode.disconnect()
-      compressor.disconnect()
-      highpassFilter.disconnect()
+      audioInput.disconnect()
     },
-    // 新增：获取音频质量统计
     getQualityStats() {
       return {
-        ...qualityStats,
-        snr: audioEnhancer.rmsHistory.length > 10 ? 
-          20 * Math.log10(qualityStats.averageRMS / (audioEnhancer.rmsHistory[0] || 0.001)) : 0
+        averageRMS: 0,
+        peakLevel: 0,
+        snr: 0,
+        processingGain: 1.0
       }
     },
     getBlob() {
@@ -796,13 +568,10 @@ const createAudioProcessor = (stream: MediaStream) => {
     clear() {
       audioData.clear()
     },
-    // 新增：获取完整音频数据
     getCompleteAudioWAV() {
       return createWAVBlob(completeAudioBuffer, outputSampleRate)
     }
   }
-  
-  return audioEnhancerProcessor
 }
 
 // 新增：创建WAV格式音频文件
