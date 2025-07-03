@@ -24,7 +24,6 @@
       </div>
       <div class="header-actions">
         <el-space>
-
           <el-button 
             v-if="aiProcessing" 
             type="warning" 
@@ -62,241 +61,229 @@
 
     <!-- 主内容区 -->
     <div v-else class="detail-content">
-      <el-row :gutter="24">
-        <!-- 左侧：智能速览 -->
-        <el-col :span="8">
-          <div class="sidebar-content">
-            <!-- 关键词云 -->
-            <el-card class="summary-card" shadow="never">
-              <template #header>
-                <div class="card-header">
-                  <h3>关键词</h3>
-                  <el-button text size="small" :icon="'Refresh'" @click="refreshKeywords">
-                    刷新
-                  </el-button>
+      <!-- 关键词区域 -->
+      <div class="section keywords-section">
+        <div class="section-header">
+          <h3>关键词</h3>
+          <!-- <el-button text size="small" :icon="'Refresh'" @click="refreshKeywords">
+            刷新
+          </el-button> -->
+        </div>
+        <div class="section-content">
+          <!-- AI处理中的loading状态 -->
+          <div v-if="keywordsLoading" class="loading-placeholder">
+            <el-skeleton animated>
+              <template #template>
+                <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                  <el-skeleton-item v-for="i in 6" :key="i" variant="button" style="width: 60px; height: 24px; border-radius: 12px;" />
                 </div>
               </template>
-              <div class="keywords-section">
-                <!-- AI处理中的loading状态 -->
-                <div v-if="keywordsLoading" class="loading-placeholder">
-                  <el-skeleton animated>
-                    <template #template>
-                      <div style="display: flex; flex-wrap: wrap; gap: 8px;">
-                        <el-skeleton-item v-for="i in 6" :key="i" variant="button" style="width: 60px; height: 24px; border-radius: 12px;" />
-                      </div>
-                    </template>
-                  </el-skeleton>
-                  <p style="text-align: center; margin-top: 12px; color: #409eff; font-size: 14px;">
-                    <el-icon class="is-loading"><Loading /></el-icon>
-                    AI正在提取关键词...
-                  </p>
-                </div>
-                <!-- 空状态 -->
-                <div v-else-if="keywords.length === 0" class="empty-placeholder">
-                  <el-icon size="48" color="#c0c4cc"><DocumentCopy /></el-icon>
-                  <p>暂无关键词数据</p>
-                </div>
-                <!-- 关键词云 -->
-                <div v-else class="keywords-cloud">
-                  <el-tag
-                    v-for="keyword in keywords"
-                    :key="keyword.word"
-                    :type="getKeywordType(keyword.score)"
-                    :size="getKeywordSize(keyword.score)"
-                    class="keyword-tag"
-                    @click="highlightKeyword(keyword.word)"
-                  >
-                    {{ keyword.word }}
-                    <span class="keyword-score">({{ keyword.count }})</span>
-                  </el-tag>
-                </div>
-              </div>
-            </el-card>
-
-            <!-- 智能摘要 -->
-            <el-card class="summary-card" shadow="never">
-              <template #header>
-                <div class="card-header">
-                  <h3>智能摘要</h3>
-                  <el-button text size="small" :icon="'Refresh'" @click="refreshSummary">
-                    重新生成
-                  </el-button>
-                </div>
-              </template>
-              <div class="summary-content">
-                <!-- AI处理中的loading状态 -->
-                <div v-if="summaryLoading" class="loading-placeholder">
-                  <el-skeleton animated>
-                    <template #template>
-                      <el-skeleton-item variant="text" style="width: 100%" />
-                      <el-skeleton-item variant="text" style="width: 80%" />
-                      <el-skeleton-item variant="text" style="width: 90%" />
-                      <el-skeleton-item variant="text" style="width: 60%" />
-                    </template>
-                  </el-skeleton>
-                  <p style="text-align: center; margin-top: 12px; color: #409eff; font-size: 14px;">
-                    <el-icon class="is-loading"><Loading /></el-icon>
-                    AI正在生成智能摘要...
-                  </p>
-                </div>
-                <!-- 空状态 -->
-                <div v-else-if="!summary.content" class="empty-placeholder">
-                  <el-icon size="48" color="#c0c4cc"><Reading /></el-icon>
-                  <p>暂无摘要数据</p>
-                </div>
-                <!-- 摘要内容 -->
-                <div v-else>
-                  <div class="summary-text">
-                    {{ summary.content }}
-                  </div>
-                  <div class="summary-meta">
-                    <el-rate 
-                      v-model="summary.quality" 
-                      :max="5" 
-                      size="small"
-                      text-color="#ff9900"
-                      void-color="#c6d1de"
-                      disabled
-                    />
-                    <span class="quality-text">摘要质量</span>
-                  </div>
-                </div>
-              </div>
-            </el-card>
-
-            <!-- 章节速览 -->
-            <el-card v-if="chaptersLoading || chapters.length > 0" class="summary-card" shadow="never">
-              <template #header>
-                <h3>章节速览</h3>
-              </template>
-              <!-- AI处理中的loading状态 -->
-              <div v-if="chaptersLoading" class="loading-placeholder">
-                <el-skeleton animated>
-                  <template #template>
-                    <div v-for="i in 3" :key="i" style="margin-bottom: 16px;">
-                      <el-skeleton-item variant="text" style="width: 30%; height: 14px;" />
-                      <el-skeleton-item variant="text" style="width: 60%; height: 16px; margin-top: 4px;" />
-                      <el-skeleton-item variant="text" style="width: 80%; height: 12px; margin-top: 4px;" />
-                    </div>
-                  </template>
-                </el-skeleton>
-                <p style="text-align: center; margin-top: 12px; color: #409eff; font-size: 14px;">
-                  <el-icon class="is-loading"><Loading /></el-icon>
-                  正在生成章节速览...
-                </p>
-              </div>
-              <!-- 章节列表 -->
-              <div v-else class="chapters-list">
-                <div
-                  v-for="(chapter, index) in chapters"
-                  :key="index"
-                  class="chapter-item"
-                  @click="jumpToChapter(chapter.startTime)"
-                >
-                  <div class="chapter-time">{{ formatTime(chapter.startTime) }}</div>
-                  <div class="chapter-title">{{ chapter.title }}</div>
-                  <div class="chapter-summary">{{ chapter.summary }}</div>
-                </div>
-              </div>
-            </el-card>
+            </el-skeleton>
+            <p class="loading-text">
+              <el-icon class="is-loading"><Loading /></el-icon>
+              AI正在提取关键词...
+            </p>
           </div>
-        </el-col>
+          <!-- 空状态 -->
+          <div v-else-if="keywords.length === 0" class="empty-placeholder">
+            <el-icon size="48" color="#c0c4cc"><DocumentCopy /></el-icon>
+            <p>暂无关键词数据</p>
+          </div>
+          <!-- 关键词云 -->
+          <div v-else class="keywords-cloud">
+            <el-tag
+              v-for="keyword in keywords"
+              :key="keyword.word"
+              :type="getKeywordType(keyword.score)"
+              :size="getKeywordSize(keyword.score)"
+              class="keyword-tag"
+              @click="highlightKeyword(keyword.word)"
+            >
+              {{ keyword.word }}
+              <span class="keyword-score">({{ keyword.count }})</span>
+            </el-tag>
+          </div>
+        </div>
+      </div>
 
-        <!-- 右侧：原文显示 -->
-        <el-col :span="16">
-          <el-card class="transcript-card" shadow="never">
-            <template #header>
-              <div class="card-header">
-                <h3>转写原文</h3>
-                <div class="transcript-controls">
-                  <el-input
-                    v-model="searchText"
-                    placeholder="搜索内容..."
-                    :prefix-icon="'Search'"
-                    size="small"
-                    style="width: 200px; margin-right: 12px;"
-                    @input="handleSearch"
-                  />
-                  <el-button :icon="'CopyDocument'" size="small" @click="copyTranscript">
-                    复制全文
-                  </el-button>
-                </div>
-              </div>
-            </template>
-            
-            <!-- 转写原文loading状态 -->
-            <div v-if="transcriptLoading" class="loading-placeholder">
-              <el-skeleton animated>
-                <template #template>
-                  <div v-for="i in 4" :key="i" style="margin-bottom: 20px;">
-                    <div style="display: flex; align-items: center; margin-bottom: 8px;">
-                      <el-skeleton-item variant="circle" style="width: 32px; height: 32px; margin-right: 12px;" />
-                      <el-skeleton-item variant="text" style="width: 80px; height: 16px;" />
-                      <el-skeleton-item variant="text" style="width: 120px; height: 14px; margin-left: auto;" />
-                    </div>
-                    <el-skeleton-item variant="text" style="width: 100%; height: 16px;" />
-                    <el-skeleton-item variant="text" style="width: 80%; height: 16px; margin-top: 4px;" />
-                  </div>
-                </template>
-              </el-skeleton>
-              <p style="text-align: center; margin-top: 12px; color: #409eff; font-size: 14px;">
-                <el-icon class="is-loading"><Loading /></el-icon>
-                正在加载转写内容...
-              </p>
+      <!-- 智能摘要区域 -->
+      <div class="section summary-section">
+        <div class="section-header">
+          <h3>智能摘要</h3>
+          <el-button text size="small" :icon="'Refresh'" @click="refreshSummary">
+            重新生成
+          </el-button>
+        </div>
+        <div class="section-content">
+          <!-- AI处理中的loading状态 -->
+          <div v-if="summaryLoading" class="loading-placeholder">
+            <el-skeleton animated>
+              <template #template>
+                <el-skeleton-item variant="text" style="width: 100%" />
+                <el-skeleton-item variant="text" style="width: 80%" />
+                <el-skeleton-item variant="text" style="width: 90%" />
+                <el-skeleton-item variant="text" style="width: 60%" />
+              </template>
+            </el-skeleton>
+            <p class="loading-text">
+              <el-icon class="is-loading"><Loading /></el-icon>
+              AI正在生成智能摘要...
+            </p>
+          </div>
+          <!-- 空状态 -->
+          <div v-else-if="!summary.content" class="empty-placeholder">
+            <el-icon size="48" color="#c0c4cc"><Reading /></el-icon>
+            <p>暂无摘要数据</p>
+          </div>
+          <!-- 摘要内容 -->
+          <div v-else class="summary-wrapper">
+            <div class="summary-text">
+              {{ summary.content }}
             </div>
-            
-            <!-- 空状态 -->
-            <div v-else-if="segments.length === 0" class="empty-placeholder">
-              <el-icon size="48" color="#c0c4cc"><ChatDotRound /></el-icon>
-              <p>暂无转写内容</p>
+            <div class="summary-meta">
+              <el-rate 
+                v-model="summary.quality" 
+                :max="5" 
+                size="small"
+                text-color="#ff9900"
+                void-color="#c6d1de"
+                disabled
+              />
+              <span class="quality-text">摘要质量</span>
             </div>
-            
-            <!-- 转写内容 -->
-            <div v-else ref="transcriptContainer" class="transcript-content">
-              <div
-                v-for="(segment, index) in filteredSegments"
-                :key="segment.id"
-                :id="`segment-${segment.id}`"
-                class="transcript-segment"
-                :class="{
-                  'highlighted': highlightedSegment === segment.id,
-                  'playing': currentPlayingSegment === segment.id
-                }"
-                @click="playSegment(segment)"
-              >
-                <div class="segment-meta">
-                  <div class="speaker-info">
-                    <el-avatar 
-                      :size="32" 
-                      :style="{ backgroundColor: segment.speakerColor }"
-                      class="speaker-avatar"
-                      @click.stop="openSpeakerSetting(segment)"
-                    >
-                      {{ getSpeakerAvatarText(segment) }}
-                    </el-avatar>
-                    <span class="speaker-name" @click.stop="openSpeakerSetting(segment)">
-                      {{ segment.speakerName }}
-                    </span>
-                  </div>
-                  <div class="segment-time">
-                    {{ formatTime(segment.startTime) }} - {{ formatTime(segment.endTime) }}
-                  </div>
-                </div>
-                <div class="segment-content">
-                  <p v-html="segment.highlightedText || segment.text"></p>
-                </div>
-              </div>
+          </div>
+        </div>
+      </div>
 
-              <!-- 空状态 -->
-              <div v-if="filteredSegments.length === 0" class="empty-state">
-                <el-empty description="没有找到匹配的内容">
-                  <el-button @click="searchText = ''">清除搜索</el-button>
-                </el-empty>
+      <!-- 章节速览区域 -->
+      <div v-if="chaptersLoading || chapters.length > 0" class="section chapters-section">
+        <div class="section-header">
+          <h3>章节速览</h3>
+        </div>
+        <div class="section-content">
+          <!-- AI处理中的loading状态 -->
+          <div v-if="chaptersLoading" class="loading-placeholder">
+            <el-skeleton animated>
+              <template #template>
+                <div v-for="i in 3" :key="i" style="margin-bottom: 16px;">
+                  <el-skeleton-item variant="text" style="width: 30%; height: 14px;" />
+                  <el-skeleton-item variant="text" style="width: 60%; height: 16px; margin-top: 4px;" />
+                  <el-skeleton-item variant="text" style="width: 80%; height: 12px; margin-top: 4px;" />
+                </div>
+              </template>
+            </el-skeleton>
+            <p class="loading-text">
+              <el-icon class="is-loading"><Loading /></el-icon>
+              正在生成章节速览...
+            </p>
+          </div>
+          <!-- 章节列表 -->
+          <div v-else class="chapters-list">
+            <div
+              v-for="(chapter, index) in chapters"
+              :key="index"
+              class="chapter-item"
+              @click="jumpToChapter(chapter.startTime)"
+            >
+              <div class="chapter-time">{{ formatTime(chapter.startTime) }}</div>
+              <div class="chapter-title">{{ chapter.title }}</div>
+              <div class="chapter-summary">{{ chapter.summary }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 转写原文区域 -->
+      <div class="section transcript-section">
+        <div class="section-header">
+          <h3>转写原文</h3>
+          <div class="transcript-controls">
+            <el-input
+              v-model="searchText"
+              placeholder="搜索内容..."
+              :prefix-icon="'Search'"
+              size="small"
+              style="width: 200px; margin-right: 12px;"
+              @input="handleSearch"
+            />
+            <el-button :icon="'CopyDocument'" size="small" @click="copyTranscript">
+              复制全文
+            </el-button>
+          </div>
+        </div>
+        <div class="section-content">
+          <!-- 转写原文loading状态 -->
+          <div v-if="transcriptLoading" class="loading-placeholder">
+            <el-skeleton animated>
+              <template #template>
+                <div v-for="i in 4" :key="i" style="margin-bottom: 20px;">
+                  <div style="display: flex; align-items: center; margin-bottom: 8px;">
+                    <el-skeleton-item variant="circle" style="width: 32px; height: 32px; margin-right: 12px;" />
+                    <el-skeleton-item variant="text" style="width: 80px; height: 16px;" />
+                    <el-skeleton-item variant="text" style="width: 120px; height: 14px; margin-left: auto;" />
+                  </div>
+                  <el-skeleton-item variant="text" style="width: 100%; height: 16px;" />
+                  <el-skeleton-item variant="text" style="width: 80%; height: 16px; margin-top: 4px;" />
+                </div>
+              </template>
+            </el-skeleton>
+            <p class="loading-text">
+              <el-icon class="is-loading"><Loading /></el-icon>
+              正在加载转写内容...
+            </p>
+          </div>
+          
+          <!-- 空状态 -->
+          <div v-else-if="segments.length === 0" class="empty-placeholder">
+            <el-icon size="48" color="#c0c4cc"><ChatDotRound /></el-icon>
+            <p>暂无转写内容</p>
+          </div>
+          
+          <!-- 转写内容 -->
+          <div v-else ref="transcriptContainer" class="transcript-content">
+            <div
+              v-for="(segment, index) in filteredSegments"
+              :key="segment.id"
+              :id="`segment-${segment.id}`"
+              class="transcript-segment"
+              :class="{
+                'highlighted': highlightedSegment === segment.id,
+                'playing': currentPlayingSegment === segment.id
+              }"
+              @click="playSegment(segment)"
+            >
+              <div class="segment-meta">
+                <div class="speaker-info">
+                  <el-avatar 
+                    :size="32" 
+                    :style="{ backgroundColor: segment.speakerColor }"
+                    class="speaker-avatar"
+                    @click.stop="openSpeakerSetting(segment)"
+                  >
+                    {{ getSpeakerAvatarText(segment) }}
+                  </el-avatar>
+                  <span class="speaker-name" @click.stop="openSpeakerSetting(segment)">
+                    {{ segment.speakerName }}
+                  </span>
+                </div>
+                <div class="segment-time">
+                  {{ formatTime(segment.startTime) }} - {{ formatTime(segment.endTime) }}
+                </div>
+              </div>
+              <div class="segment-content">
+                <p v-html="segment.highlightedText || segment.text"></p>
               </div>
             </div>
-          </el-card>
-        </el-col>
-      </el-row>
+
+            <!-- 搜索无结果状态 -->
+            <div v-if="filteredSegments.length === 0" class="empty-state">
+              <el-empty description="没有找到匹配的内容">
+                <el-button @click="searchText = ''">清除搜索</el-button>
+              </el-empty>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- AI处理状态指示器 -->
@@ -1091,39 +1078,33 @@ onUnmounted(() => {
 .recording-detail-view {
   display: flex;
   flex-direction: column;
-  height: 100vh;
-  background: #f5f7fa;
+  min-height: 100vh;
+  background-color: #f5f7fa;
+  padding-bottom: 120px; /* 为底部播放器留出空间 */
 }
 
 .detail-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background-color: #fff;
+  padding: 16px 20px;
+  border-bottom: 1px solid #e4e7ed;
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
-  padding: 20px 24px;
-  background: white;
-  border-bottom: 1px solid #e4e7ed;
-  gap: 20px;
+  align-items: center;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
 }
 
 .header-left {
   display: flex;
   align-items: center;
   gap: 16px;
-  flex: 1;
-}
-
-.back-button {
-  padding: 8px !important;
-  color: #606266;
-}
-
-.title-section {
-  flex: 1;
 }
 
 .recording-title {
-  margin: 0 0 8px 0;
-  font-size: 24px;
+  margin: 0;
+  font-size: 20px;
   font-weight: 600;
   color: #303133;
 }
@@ -1132,100 +1113,53 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 12px;
-  flex-wrap: wrap;
-}
-
-.meta-item {
+  margin-top: 8px;
   color: #909399;
   font-size: 14px;
 }
 
-.header-actions {
-  flex-shrink: 0;
-}
-
-.loading-container {
-  flex: 1;
-  padding: 24px;
-}
-
-.danger-item {
-  color: #f56c6c;
+.meta-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .detail-content {
   flex: 1;
-  padding: 24px;
-  overflow: hidden;
+  padding: 20px;
+  max-width: 1200px;
+  margin: 0 auto;
+  width: 100%;
 }
 
-.sidebar-content {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-  height: 100%;
+.section {
+  margin-bottom: 15px;
+  background: #fff;
+  border-radius: 8px;
 }
 
-.summary-card {
-  border-radius: 12px;
-  border: none;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+.section-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid #f0f2f5;
 }
 
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.card-header h3 {
+.section-header h3 {
   margin: 0;
   font-size: 16px;
   font-weight: 600;
   color: #303133;
 }
 
-.empty-placeholder {
-  text-align: center;
-  padding: 40px 20px;
-  color: #909399;
+.section-content {
+  padding: 15px 20px;
 }
 
-.empty-placeholder p {
-  margin: 12px 0 0 0;
-  font-size: 14px;
-}
-
-.loading-placeholder {
-  padding: 20px;
-}
-
-.loading-placeholder p {
-  margin: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-}
-
-.is-loading {
-  animation: rotating 2s linear infinite;
-}
-
-@keyframes rotating {
-  0% {
-    transform: rotate(0deg);
-  }
-  100% {
-    transform: rotate(360deg);
-  }
-}
-
+/* 关键词区域样式 */
 .keywords-cloud {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 8px;
+  gap: 12px;
+  padding: 8px 0;
 }
 
 .keyword-tag {
@@ -1235,242 +1169,211 @@ onUnmounted(() => {
 
 .keyword-tag:hover {
   transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
 }
 
-.keyword-score {
-  font-size: 12px;
-  opacity: 0.7;
-  margin-left: 4px;
-}
-
-.summary-content {
-  line-height: 1.6;
+/* 摘要区域样式 */
+.summary-wrapper {
+  line-height: 1.8;
+  color: #303133;
 }
 
 .summary-text {
-  margin-bottom: 16px;
-  color: #606266;
-  font-size: 14px;
+  font-size: 15px;
+  white-space: pre-wrap;
 }
 
 .summary-meta {
+  margin-top: 16px;
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.quality-text {
-  font-size: 12px;
-  color: #909399;
-}
-
+/* 章节区域样式 */
 .chapters-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
 }
 
 .chapter-item {
-  padding: 12px;
-  background: #f8f9fa;
+  padding: 16px;
   border-radius: 8px;
+  background: #f9fafc;
   cursor: pointer;
   transition: all 0.3s;
 }
 
 .chapter-item:hover {
-  background: #e8f4ff;
-  border-color: #409eff;
+  background: #f0f2f5;
 }
 
 .chapter-time {
-  font-size: 12px;
-  color: #409eff;
-  font-weight: 600;
-  margin-bottom: 4px;
+  color: #909399;
+  font-size: 14px;
+  margin-bottom: 8px;
 }
 
 .chapter-title {
-  font-size: 14px;
-  font-weight: 600;
+  font-weight: 500;
   color: #303133;
-  margin-bottom: 4px;
+  margin-bottom: 8px;
 }
 
 .chapter-summary {
-  font-size: 12px;
   color: #606266;
+  font-size: 14px;
+  line-height: 1.6;
 }
 
-.transcript-card {
-  border-radius: 12px;
-  border: none;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  height: 100%;
-}
-
-.transcript-controls {
-  display: flex;
-  align-items: center;
-}
-
+/* 转写原文区域样式 */
 .transcript-content {
-  max-height: calc(100vh - 400px);
-  overflow-y: auto;
-  padding-right: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
 }
 
 .transcript-segment {
   padding: 16px;
-  margin-bottom: 12px;
-  background: #f8f9fa;
-  border-radius: 12px;
-  border: 2px solid transparent;
-  cursor: pointer;
+  border-radius: 8px;
+  background: #f9fafc;
   transition: all 0.3s;
 }
 
 .transcript-segment:hover {
-  background: #e8f4ff;
-  border-color: #c6d7f0;
-}
-
-.transcript-segment.highlighted {
-  background: #fff7e6;
-  border-color: #ffa940;
+  background: #f0f2f5;
 }
 
 .transcript-segment.playing {
-  background: #e6f7ff;
-  border-color: #409eff;
+  background: #ecf5ff;
+}
+
+.transcript-segment.highlighted {
+  background: #fdf6ec;
 }
 
 .segment-meta {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
+  margin-bottom: 12px;
 }
 
 .speaker-info {
   display: flex;
   align-items: center;
   gap: 8px;
-  
-  .speaker-avatar {
-    cursor: pointer;
-    transition: transform 0.2s;
-    
-    &:hover {
-      transform: scale(1.05);
-    }
-  }
+}
+
+.speaker-avatar {
+  cursor: pointer;
 }
 
 .speaker-name {
-  font-weight: 600;
+  font-weight: 500;
   color: #303133;
-  font-size: 14px;
   cursor: pointer;
-  transition: color 0.2s;
-  
-  &:hover {
-    color: #409eff;
-  }
 }
 
 .segment-time {
-  font-size: 12px;
-  color: #909399;
-  font-family: 'SF Mono', 'Monaco', 'Menlo', 'Courier New', monospace;
-}
-
-.segment-content {
-  line-height: 1.6;
-  color: #606266;
-}
-
-.segment-content p {
-  margin: 0;
-}
-
-.segment-content :deep(mark) {
-  background: #fff2cc;
-  color: #d46b08;
-  padding: 0 2px;
-  border-radius: 2px;
-}
-
-.audio-player-section {
-  position: sticky;
-  bottom: 0;
-  background: white;
-  border-top: 1px solid #e4e7ed;
-  padding: 16px 24px;
-  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.1);
-  z-index: 100;
-}
-
-.audio-player-placeholder {
-  position: sticky;
-  bottom: 0;
-  background: white;
-  border-top: 1px solid #e4e7ed;
-  padding: 24px;
-  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.1);
-  z-index: 100;
-}
-
-.placeholder-content {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
   color: #909399;
   font-size: 14px;
 }
 
-.empty-state {
-  padding: 60px 20px;
+.segment-content {
+  color: #303133;
+  line-height: 1.8;
+  font-size: 15px;
+}
+
+/* Loading状态样式 */
+.loading-text {
   text-align: center;
+  margin-top: 12px;
+  color: #409eff;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
 }
 
-.danger-item {
-  color: #f56c6c;
-}
-
-:deep(.el-card__header) {
-  padding: 16px 20px;
-  border-bottom: 1px solid #f0f0f0;
-}
-
-:deep(.el-card__body) {
-  padding: 20px;
-}
-
-.processing-indicator {
-  position: sticky;
+/* 音频播放器样式 */
+.audio-player-section {
+  position: fixed;
   bottom: 0;
-  background: #f0f9ff;
-  border-top: 1px solid #d1e7dd;
-  padding: 12px 24px;
-  z-index: 1000;
+  left: 0;
+  right: 0;
+  background: #fff;
   box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.1);
+  z-index: 100;
+}
+
+/* 处理状态指示器样式 */
+.processing-indicator {
+  position: fixed;
+  bottom: 120px;
+  right: 24px;
+  background: #fff;
+  padding: 12px 16px;
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+  z-index: 99;
+  max-width: 400px;
 }
 
 .processing-content {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
   margin-bottom: 8px;
 }
 
 .processing-text {
-  color: #409eff;
-  font-size: 14px;
-  font-weight: 500;
-  margin-left: 8px;
   flex: 1;
+  font-size: 14px;
+  color: #606266;
+}
+
+/* 空状态样式 */
+.empty-placeholder {
+  text-align: center;
+  padding: 48px 0;
+  color: #909399;
+}
+
+.empty-placeholder .el-icon {
+  margin-bottom: 16px;
+}
+
+.empty-state {
+  padding: 32px 0;
+}
+
+/* 响应式调整 */
+@media screen and (max-width: 768px) {
+  .detail-header {
+    padding: 12px 16px;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .header-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .detail-content {
+    padding: 16px;
+  }
+
+  .section-header {
+    padding: 12px 16px;
+  }
+
+  .section-content {
+    padding: 16px;
+  }
 }
 </style>
