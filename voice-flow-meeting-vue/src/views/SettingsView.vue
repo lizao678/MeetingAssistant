@@ -383,7 +383,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Microphone } from '@element-plus/icons-vue'
+import { Setting, Microphone } from '@element-plus/icons-vue'
 import type { AudioSettings } from '@/types/audio'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { storeToRefs } from 'pinia'
@@ -447,32 +447,11 @@ const advancedSettings = reactive({
 
 // 从store加载设置
 const loadSettingsFromStore = () => {
-  // 1. 加载音频设置
-  speechSettings.value = { ...storeSpeechSettings.value }
+  // 加载音频设置
+  const { speechSettings: storeSpeechSettings } = settingsStore
   
-  // 2. 加载其他设置
-  const storeSettingsValue = storeSettings.value
-  
-  // 更新说话人识别设置
-  speakerSettings.enableSpeakerDiarization = storeSettingsValue.enableSpeakerRecognition
-  
-  // 更新界面设置
-  uiSettings.theme = storeSettingsValue.theme
-  uiSettings.fontSize = storeSettingsValue.fontSize
-  uiSettings.enableNotifications = storeSettingsValue.enableNotifications
-  
-  // 更新存储设置
-  storageSettings.autoSave = storeSettingsValue.autoSave
-  storageSettings.enableCloudSync = storeSettingsValue.saveLocation === 'cloud'
-  
-  // 更新智能总结设置
-  summarySettings.enableAutoSummary = storeSettingsValue.autoGenerateSummary
-  summarySettings.includeKeywords = storeSettingsValue.autoExtractKeywords
-  summarySettings.includeSentiment = storeSettingsValue.enableSentimentAnalysis
-  summarySettings.summaryLanguage = storeSettingsValue.summaryLanguage
-  
-  // 更新高级设置
-  advancedSettings.cacheSize = storeSettingsValue.maxLocalStorage
+  // 更新语音识别设置
+  speechSettings.value = { ...storeSpeechSettings }
 }
 
 // 组件加载时初始化设置
@@ -543,52 +522,10 @@ const activeTab = ref('speech')
 // 保存设置
 const saveSettings = () => {
   try {
-    // 1. 更新音频设置
-    storeSpeechSettings.value = { ...speechSettings.value }
+    // 更新store中的设置
+    settingsStore.speechSettings = { ...speechSettings.value }
     
-    // 2. 更新其他设置
-    settingsStore.updateSettings({
-      // 语音识别设置
-      defaultLanguage: speechSettings.value.defaultLanguage,
-      enableSpeakerRecognition: speakerSettings.enableSpeakerDiarization,
-      enableSmartBreaks: true,
-      enablePunctuation: true,
-      
-      // 显示设置
-      theme: uiSettings.theme as 'light' | 'dark' | 'auto',
-      fontSize: uiSettings.fontSize as 'small' | 'medium' | 'large',
-      messageDisplayMode: 'bubble',
-      showTimestamps: true,
-      
-      // 音频设置
-      audioDevice: '',
-      enableNoiseReduction: speechSettings.value.enableNoiseSuppression,
-      enableEchoCancellation: speechSettings.value.enableEchoCancellation,
-      audioQuality: 'medium',
-      
-      // 存储设置
-      autoSave: storageSettings.autoSave,
-      saveLocation: storageSettings.enableCloudSync ? 'cloud' : 'local',
-      maxLocalStorage: advancedSettings.cacheSize,
-      
-      // 通知设置
-      enableNotifications: uiSettings.enableNotifications,
-      notificationSound: false,
-      errorNotifications: true,
-      
-      // AI功能设置
-      autoGenerateSummary: summarySettings.enableAutoSummary,
-      autoExtractKeywords: summarySettings.includeKeywords,
-      enableSentimentAnalysis: summarySettings.includeSentiment,
-      summaryLanguage: summarySettings.summaryLanguage,
-      
-      // 隐私设置
-      enableLocalProcessing: false,
-      shareAnalyticsData: false,
-      retainAudioData: true
-    })
-
-    // 3. 保存到本地存储
+    // 保存到本地存储
     settingsStore.saveSettings()
 
     ElMessage.success('设置已保存')

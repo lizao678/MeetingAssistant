@@ -1080,7 +1080,7 @@ onUnmounted(() => {
   flex-direction: column;
   min-height: 100vh;
   background-color: #f5f7fa;
-  padding-bottom: 120px; /* 为底部播放器留出空间 */
+  /* padding-bottom: 120px; 为底部播放器留出空间 */
 }
 
 .detail-header {
@@ -1300,10 +1300,11 @@ onUnmounted(() => {
 
 /* 音频播放器样式 */
 .audio-player-section {
-  position: fixed;
+  position: sticky;
   bottom: 0;
   left: 0;
   right: 0;
+  padding: 0 2px;
   background: #fff;
   box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.1);
   z-index: 100;
