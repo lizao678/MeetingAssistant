@@ -9,7 +9,7 @@ export { default as http } from './http'
 // 导出类型定义
 export type { Recording, RecordingFilter } from './recordingService'
 export type { UploadProgress, UploadResult } from './uploadService'
-export type { SummaryData, TranscriptAnalysis } from './aiService'
+export type { SummaryData, TranscriptAnalysis } from './aiService' 
 export type { 
   FrequentSpeaker, 
   FrequentSpeakerRequest, 

@@ -37,88 +37,69 @@
             <div class="settings-section">
               <h3>基础设置</h3>
               <el-form :model="speechSettings" label-width="140px">
-                <el-form-item label="默认识别语言">
+                <el-form-item label="默认语言">
                   <el-select v-model="speechSettings.defaultLanguage" style="width: 200px">
-                    <el-option
-                      v-for="lang in languageOptions"
-                      :key="lang.value"
-                      :label="lang.label"
-                      :value="lang.value"
-                    />
+                    <el-option label="中文" value="zh" />
+                    <el-option label="英文" value="en" />
+                    <el-option label="日语" value="ja" />
+                    <el-option label="韩语" value="ko" />
+                    <el-option label="粤语" value="yue" />
                   </el-select>
+                  <div class="setting-tip">设置默认的语音识别语言</div>
                 </el-form-item>
 
                 <el-form-item label="采样率">
                   <el-select v-model="speechSettings.sampleRate" style="width: 200px">
-                    <el-option label="8kHz" :value="8000" />
                     <el-option label="16kHz" :value="16000" />
-                    <el-option label="22kHz" :value="22050" />
-                    <el-option label="44kHz" :value="44100" />
+                    <el-option label="44.1kHz" :value="44100" />
+                    <el-option label="48kHz" :value="48000" />
                   </el-select>
+                  <div class="setting-tip">音频采样率，越高质量越好</div>
                 </el-form-item>
 
                 <el-form-item label="最大语音长度">
                   <el-input-number
                     v-model="speechSettings.maxSpeechLength"
-                    :min="10"
+                    :min="30"
                     :max="300"
+                    :step="30"
                     style="width: 200px"
                   />
-                  <span class="unit">秒</span>
+                  <div class="setting-tip">单次录音的最大时长（秒）</div>
                 </el-form-item>
               </el-form>
 
               <h3>音频处理</h3>
               <el-form :model="speechSettings" label-width="140px">
-                <el-form-item label="音频增强">
-                  <el-switch v-model="speechSettings.enableAudioEnhancement" />
-                  <div class="setting-tip">提升音频质量，降低噪声（如遇问题可关闭）</div>
-                </el-form-item>
-
-                <template v-if="speechSettings.enableAudioEnhancement">
-                  <el-form-item label="增强强度">
-                    <el-select v-model="speechSettings.enhancementLevel" style="width: 200px">
-                      <el-option label="轻度" value="light" />
-                      <el-option label="中等" value="medium" />
-                      <el-option label="强" value="strong" />
-                    </el-select>
-                    <div class="setting-tip">选择合适的增强强度</div>
-                  </el-form-item>
-
-                  <el-form-item label="噪声抑制">
-                    <el-switch v-model="speechSettings.enableNoiseSuppression" />
-                    <div class="setting-tip">降低背景噪声</div>
-                  </el-form-item>
-
-                  <el-form-item label="音量自动调节">
-                    <el-switch v-model="speechSettings.enableAutoGain" />
-                    <div class="setting-tip">自动平衡音量大小</div>
-                  </el-form-item>
-                </template>
-
                 <el-form-item label="语音活动检测">
                   <el-switch v-model="speechSettings.enableVAD" />
-                  <div class="setting-tip">自动检测语音开始和结束</div>
+                  <div class="setting-tip">自动检测语音活动，减少无效录音</div>
                 </el-form-item>
 
-                <el-form-item label="VAD阈值" v-if="speechSettings.enableVAD">
+                <el-form-item label="VAD灵敏度" v-if="speechSettings.enableVAD">
                   <el-slider
                     v-model="speechSettings.vadThreshold"
-                    :min="0.1"
+                    :min="0"
                     :max="1"
                     :step="0.1"
                     style="width: 200px"
                   />
+                  <div class="setting-tip">调整语音检测的灵敏度</div>
+                </el-form-item>
+
+                <el-form-item label="噪声抑制">
+                  <el-switch v-model="speechSettings.enableNoiseSuppression" />
+                  <div class="setting-tip">降低背景噪声</div>
                 </el-form-item>
 
                 <el-form-item label="回声消除">
                   <el-switch v-model="speechSettings.enableEchoCancellation" />
-                  <div class="setting-tip">消除扬声器回声</div>
+                  <div class="setting-tip">消除音频回声</div>
                 </el-form-item>
 
                 <el-form-item label="实时转写">
                   <el-switch v-model="speechSettings.enableRealTimeTranscription" />
-                  <div class="setting-tip">边说边转写，实时显示结果</div>
+                  <div class="setting-tip">启用实时语音转写功能</div>
                 </el-form-item>
               </el-form>
 
