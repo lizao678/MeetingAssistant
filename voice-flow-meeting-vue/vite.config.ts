@@ -16,6 +16,7 @@ export default defineConfig({
     },
   },
   server: {
+    port: 5002,
     proxy: {
       '/api': {
         target: 'http://localhost:26000',
@@ -30,5 +31,8 @@ export default defineConfig({
         secure: false
       }
     }
+  },
+  preview: {
+    port: 5002
   }
 })
