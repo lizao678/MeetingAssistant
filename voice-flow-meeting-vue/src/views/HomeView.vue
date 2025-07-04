@@ -61,15 +61,15 @@ const featureCards = [
     bgGradient: 'linear-gradient(135deg, #4ECDC4 0%, #44A08D 100%)',
     route: '/upload'
   },
-  {
-    title: '智能总结',
-    subtitle: '输入RSS订阅链接',
-    description: '无需下载，智能提炼关键',
-    icon: 'Document',
-    color: '#45B7D1',
-    bgGradient: 'linear-gradient(135deg, #45B7D1 0%, #96C93D 100%)',
-    route: '/summary/new'
-  }
+//   {
+//     title: '智能总结',
+//     subtitle: '输入RSS订阅链接',
+//     description: '无需下载，智能提炼关键',
+//     icon: 'Document',
+//     color: '#45B7D1',
+//     bgGradient: 'linear-gradient(135deg, #45B7D1 0%, #96C93D 100%)',
+//     route: '/upload'
+//   }
 ]
 
 // 导航到功能页面
@@ -84,7 +84,7 @@ const playRecord = (record: any) => {
 
 // 查看录音详情
 const viewRecord = (record: any) => {
-  router.push(`/summary/${record.id}`)
+  router.push(`/recording/${record.id}`)
 }
 </script>
 

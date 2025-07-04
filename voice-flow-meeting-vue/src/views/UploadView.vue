@@ -2,6 +2,7 @@
 import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import recordingService from '@/services/recordingService'
 
 const router = useRouter()
 
@@ -39,6 +40,7 @@ const outputFormats = [
 const fileList = ref([])
 const uploadProgress = ref(0)
 const isUploading = ref(false)
+const selectedFile = ref<File | null>(null)
 
 // 文件格式限制
 const allowedTypes = [
@@ -49,8 +51,8 @@ const allowedTypes = [
 // 最大文件大小 (500MB)
 const maxFileSize = 500 * 1024 * 1024
 
-// 处理文件上传前的检查
-const beforeUpload = (file: File) => {
+// 处理文件选择
+const handleFileSelect = (file: File) => {
   // 检查文件类型
   if (!allowedTypes.includes(file.type)) {
     ElMessage.error('不支持的文件格式！请上传音频或视频文件。')
@@ -63,33 +65,53 @@ const beforeUpload = (file: File) => {
     return false
   }
   
-  return true
+  selectedFile.value = file
+  ElMessage.success(`文件 "${file.name}" 已选择，请点击开始处理按钮`)
+  return false // 阻止自动上传
 }
 
-// 处理文件上传
-const handleUpload = (options: any) => {
-  const { file } = options
+// 开始处理录音
+const startProcessing = async () => {
+  if (!selectedFile.value) {
+    ElMessage.warning('请先选择一个文件')
+    return
+  }
   
-  isUploading.value = true
-  uploadProgress.value = 0
-  
-  // 模拟上传进度
-  const progressInterval = setInterval(() => {
-    uploadProgress.value += Math.random() * 15
-    if (uploadProgress.value >= 100) {
-      uploadProgress.value = 100
-      clearInterval(progressInterval)
-      
-      setTimeout(() => {
-        isUploading.value = false
-        ElMessage.success('上传完成，开始转写处理...')
-        
-        // 跳转到处理结果页面
-        const recordId = 'upload_' + Date.now()
-        router.push(`/summary/${recordId}`)
-      }, 500)
+  try {
+    isUploading.value = true
+    uploadProgress.value = 0
+    
+    // 创建请求数据
+    const requestData = {
+      audioFile: selectedFile.value,
+      speakerCount: uploadConfig.speakerCount,
+      language: uploadConfig.language,
+      smartPunctuation: uploadConfig.enablePunctuation,
+      numberConversion: uploadConfig.enableNumberConversion,
+      generateSummary: true,
+      summaryType: 'meeting'
     }
-  }, 200)
+    
+    // 发送请求到后端
+    const result = await recordingService.processRecording(requestData, (progress) => {
+      uploadProgress.value = progress
+    })
+    
+    uploadProgress.value = 100
+    setTimeout(() => {
+      isUploading.value = false
+      ElMessage.success('上传完成，开始转写处理...')
+      
+      // 跳转到处理结果页面
+      router.push(`/recording/${result.recording_id}`)
+    }, 500)
+    
+  } catch (error: any) {
+    isUploading.value = false
+    uploadProgress.value = 0
+    ElMessage.error(error.response?.data?.detail || error.message || '上传失败，请重试')
+    console.error('上传失败:', error)
+  }
 }
 
 // 移除文件
@@ -170,6 +192,15 @@ const resetConfig = () => {
   uploadConfig.speakerCount = 0
   ElMessage.info('配置已重置')
 }
+
+// 格式化文件大小
+const formatFileSize = (bytes: number): string => {
+  if (bytes === 0) return '0 Bytes'
+  const k = 1024
+  const sizes = ['Bytes', 'KB', 'MB', 'GB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+}
 </script>
 
 <template>
@@ -204,8 +235,8 @@ const resetConfig = () => {
               <el-upload
                 class="upload-dragger"
                 drag
-                :before-upload="beforeUpload"
-                :http-request="handleUpload"
+                :before-upload="handleFileSelect"
+                :auto-upload="false"
                 :on-remove="handleRemove"
                 :on-exceed="handleExceed"
                 :file-list="fileList"
@@ -223,6 +254,25 @@ const resetConfig = () => {
                 </div>
               </el-upload>
 
+              <!-- 选中的文件信息 -->
+              <div v-if="selectedFile && !isUploading" class="selected-file-info">
+                <div class="file-info">
+                  <el-icon><Document /></el-icon>
+                  <div class="file-details">
+                    <p class="file-name">{{ selectedFile.name }}</p>
+                    <p class="file-size">{{ formatFileSize(selectedFile.size) }}</p>
+                  </div>
+                </div>
+                <el-button 
+                  type="primary" 
+                  size="large"
+                  @click="startProcessing"
+                  :disabled="isUploading"
+                >
+                  开始处理
+                </el-button>
+              </div>
+
               <!-- 上传进度 -->
               <div v-if="isUploading" class="upload-progress">
                 <el-progress
@@ -230,7 +280,7 @@ const resetConfig = () => {
                   :stroke-width="8"
                   status="success"
                 />
-                <p class="progress-text">正在上传文件...</p>
+                <p class="progress-text">正在上传和处理文件...</p>
               </div>
             </div>
 
@@ -473,6 +523,36 @@ const resetConfig = () => {
 .upload-tip {
   font-size: 14px !important;
   color: #909399 !important;
+}
+
+/* 选中文件信息 */
+.selected-file-info {
+  margin-top: 24px;
+  padding: 20px;
+  background: #f0f9ff;
+  border: 1px solid #e1f5fe;
+  border-radius: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.file-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.file-details .file-name {
+  font-weight: 500;
+  color: #303133;
+  margin: 0 0 4px 0;
+}
+
+.file-details .file-size {
+  font-size: 14px;
+  color: #909399;
+  margin: 0;
 }
 
 /* 上传进度 */

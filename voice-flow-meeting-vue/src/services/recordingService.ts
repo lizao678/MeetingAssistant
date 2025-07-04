@@ -87,7 +87,10 @@ export interface RecordingFilter {
 
 class RecordingService {
   // 处理录音文件（新API）
-  async processRecording(data: RecordingProcessRequest): Promise<RecordingProcessResponse> {
+  async processRecording(
+    data: RecordingProcessRequest, 
+    onProgress?: (progress: number) => void
+  ): Promise<RecordingProcessResponse> {
     const formData = new FormData()
     formData.append('audio_file', data.audioFile)
     formData.append('speaker_count', data.speakerCount.toString())
@@ -101,6 +104,12 @@ class RecordingService {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
+      onUploadProgress: (progressEvent) => {
+        if (onProgress && progressEvent.total) {
+          const percentage = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+          onProgress(percentage)
+        }
+      }
     })
   }
 
@@ -276,6 +285,8 @@ class RecordingService {
   }> {
     return http.get('/api/recordings/statistics')
   }
+
+
 }
 
 export default new RecordingService() 
