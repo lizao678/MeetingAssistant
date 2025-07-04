@@ -2,7 +2,7 @@
 import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import recordingService from '@/services/recordingService'
+import recordingService, { type RecordingProcessResponse } from '@/services/recordingService'
 
 const router = useRouter()
 
@@ -40,6 +40,8 @@ const outputFormats = [
 const fileList = ref([])
 const uploadProgress = ref(0)
 const isUploading = ref(false)
+const uploadCompleted = ref(false)
+const uploadResult = ref<RecordingProcessResponse | null>(null)
 const selectedFile = ref<File | null>(null)
 
 // 文件格式限制
@@ -100,28 +102,46 @@ const startProcessing = async () => {
     uploadProgress.value = 100
     setTimeout(() => {
       isUploading.value = false
+      uploadCompleted.value = true
+      uploadResult.value = result
       ElMessage.success('上传完成，开始转写处理...')
-      
-      // 跳转到处理结果页面
-      router.push(`/recording/${result.recording_id}`)
     }, 500)
     
   } catch (error: any) {
     isUploading.value = false
     uploadProgress.value = 0
+    // 在错误时也重置为可以重新选择文件的状态
+    selectedFile.value = null
+    fileList.value = []
     ElMessage.error(error.response?.data?.detail || error.message || '上传失败，请重试')
     console.error('上传失败:', error)
   }
 }
 
 // 移除文件
-const handleRemove = (file: any, fileList: any[]) => {
+const handleRemove = (file: any, fileListArray: any[]) => {
+  selectedFile.value = null
+  uploadCompleted.value = false
+  uploadResult.value = null
   ElMessage.info('文件已移除')
 }
 
 // 文件超出限制
 const handleExceed = () => {
   ElMessage.warning('最多只能上传一个文件')
+}
+
+// 处理文件列表变化
+const handleFileChange = (file: any, fileListArray: any[]) => {
+  if (fileListArray.length > 0) {
+    const latestFile = fileListArray[fileListArray.length - 1]
+    if (latestFile.raw) {
+      selectedFile.value = latestFile.raw
+      console.log('文件已选择:', latestFile.raw.name)
+    }
+  } else {
+    selectedFile.value = null
+  }
 }
 
 // 快速配置预设
@@ -201,6 +221,29 @@ const formatFileSize = (bytes: number): string => {
   const i = Math.floor(Math.log(bytes) / Math.log(k))
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
 }
+
+// 查看处理结果
+const viewResult = () => {
+  if (uploadResult.value?.recording_id) {
+    router.push(`/recording/${uploadResult.value.recording_id}`)
+  }
+}
+
+// 重新上传
+const uploadAnother = () => {
+  selectedFile.value = null
+  uploadCompleted.value = false
+  uploadResult.value = null
+  uploadProgress.value = 0
+  isUploading.value = false
+  fileList.value = []
+  ElMessage.info('已重置，可以上传新文件')
+}
+
+// 返回首页
+const goHome = () => {
+  router.push('/')
+}
 </script>
 
 <template>
@@ -239,6 +282,7 @@ const formatFileSize = (bytes: number): string => {
                 :auto-upload="false"
                 :on-remove="handleRemove"
                 :on-exceed="handleExceed"
+                :on-change="handleFileChange"
                 :file-list="fileList"
                 :limit="1"
                 accept="audio/*,video/*"
@@ -254,8 +298,15 @@ const formatFileSize = (bytes: number): string => {
                 </div>
               </el-upload>
 
+              <!-- 调试信息 -->
+              <div v-if="!selectedFile && fileList.length > 0" class="debug-info" style="margin-top: 16px; padding: 12px; background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 4px;">
+                <p style="margin: 0; color: #856404; font-size: 14px;">
+                  调试信息：文件列表长度 {{ fileList.length }}，selectedFile: {{ selectedFile ? '已设置' : '未设置' }}
+                </p>
+              </div>
+
               <!-- 选中的文件信息 -->
-              <div v-if="selectedFile && !isUploading" class="selected-file-info">
+              <div v-if="selectedFile && !isUploading && !uploadCompleted" class="selected-file-info">
                 <div class="file-info">
                   <el-icon><Document /></el-icon>
                   <div class="file-details">
@@ -281,6 +332,63 @@ const formatFileSize = (bytes: number): string => {
                   status="success"
                 />
                 <p class="progress-text">正在上传和处理文件...</p>
+              </div>
+
+              <!-- 上传完成状态 -->
+              <div v-if="uploadCompleted && uploadResult" class="upload-completed">
+                <div class="completion-info">
+                  <el-icon class="success-icon" color="#67c23a" size="48">
+                    <CircleCheck />
+                  </el-icon>
+                  <div class="completion-text">
+                    <h3>上传成功！</h3>
+                    <p>文件已成功上传并开始处理，您可以：</p>
+                  </div>
+                </div>
+                
+                <div class="completion-actions">
+                  <el-button 
+                    type="primary" 
+                    size="large"
+                    @click="viewResult"
+                  >
+                    <el-icon><View /></el-icon>
+                    查看处理结果
+                  </el-button>
+                  
+                  <el-button 
+                    size="large"
+                    @click="uploadAnother"
+                  >
+                    <el-icon><Upload /></el-icon>
+                    上传其他文件
+                  </el-button>
+                  
+                  <el-button 
+                    size="large"
+                    @click="goHome"
+                  >
+                    <el-icon><House /></el-icon>
+                    返回首页
+                  </el-button>
+                </div>
+
+                <div class="upload-result-info">
+                  <el-descriptions :column="2" size="small" border>
+                    <el-descriptions-item label="录音ID">
+                      {{ uploadResult.recording_id }}
+                    </el-descriptions-item>
+                    <el-descriptions-item label="处理状态">
+                      <el-tag type="success">处理中</el-tag>
+                    </el-descriptions-item>
+                    <el-descriptions-item label="文件名">
+                      {{ selectedFile?.name }}
+                    </el-descriptions-item>
+                    <el-descriptions-item label="文件大小">
+                      {{ selectedFile ? formatFileSize(selectedFile.size) : '-' }}
+                    </el-descriptions-item>
+                  </el-descriptions>
+                </div>
               </div>
             </div>
 
@@ -569,6 +677,51 @@ const formatFileSize = (bytes: number): string => {
   margin: 8px 0 0 0;
 }
 
+/* 上传完成状态 */
+.upload-completed {
+  margin-top: 24px;
+  padding: 24px;
+  background: #f0f9ff;
+  border: 1px solid #e1f5fe;
+  border-radius: 12px;
+}
+
+.completion-info {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.completion-text h3 {
+  font-size: 18px;
+  font-weight: 600;
+  color: #303133;
+  margin: 0 0 8px 0;
+}
+
+.completion-text p {
+  color: #606266;
+  margin: 0;
+  font-size: 14px;
+}
+
+.completion-actions {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.completion-actions .el-button {
+  flex: 1;
+  min-width: 140px;
+}
+
+.upload-result-info {
+  margin-top: 20px;
+}
+
 /* 格式信息 */
 .format-info {
   padding: 20px;
@@ -682,6 +835,14 @@ const formatFileSize = (bytes: number): string => {
 
   .upload-text p {
     font-size: 14px;
+  }
+
+  .completion-actions {
+    flex-direction: column;
+  }
+
+  .completion-actions .el-button {
+    min-width: auto;
   }
 }
 </style> 
